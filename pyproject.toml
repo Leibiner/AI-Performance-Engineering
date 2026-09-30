@@ -1,0 +1,13 @@
+[project]
+name = "ai-performance-engineering"
+version = "0.1.0"
+description = "以 k6 为执行引擎的性能工程控制台：后端服务"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.142.1",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[tool.uv]
+# 后端代码在 server/ 目录，直接用 `uv run` 运行，不需要打包安装。
+package = false

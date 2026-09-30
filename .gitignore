@@ -1,0 +1,22 @@
+# 项目自带工具链（scripts/setup.sh 下载）
+.tools/
+
+# 运行时数据：SQLite 数据库、运行产物、日志、进程号
+data/
+results/
+logs/
+*.pid
+
+# 依赖与构建产物
+node_modules/
+web/dist/
+
+# 编辑器与系统文件
+.DS_Store
+.vscode/
+.idea/
+
+# Python 虚拟环境（uv 管理）与缓存
+.venv/
+__pycache__/
+*.pyc
