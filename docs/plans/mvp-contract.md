@@ -38,7 +38,8 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 | 页面上的名称 | 表 | 对应 `ARCHITECTURE.md` 的概念 |
 |---|---|---|
-| 环境 | `environments` | Environment（含流量上限护栏） |
+| 执行机 | `executors` | Load Generator：安装了本项目、实际运行 k6 的机器 |
+| 被测环境 | `environments` | Environment：被测系统的某个环境（开发 / 测试 / 预发 / 生产），含安全上限 |
 | 接口 | `apis` | Service 中的一个请求 |
 | 业务流程 | `flows` | Flow（按顺序执行的接口步骤） |
 | 负载配置 | `profiles` | Load Profile（显式 `model: open / closed`） |
@@ -75,14 +76,18 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 ```json
 {
-  "id": 1, "name": "百度（仅冒烟）", "baseUrl": "https://www.baidu.com",
+  "id": 1, "name": "百度（仅冒烟）", "type": "prod", "baseUrl": "https://www.baidu.com",
   "headers": { "User-Agent": "Mozilla/5.0 k6-mvp" },
   "maxVus": 2, "maxRate": 2, "maxDurationSec": 60,
   "note": "第三方线上站点，只允许冒烟级别流量"
 }
 ```
 
-`maxVus`、`maxRate`（每秒迭代数）、`maxDurationSec` 是硬性上限，三者必填且为正数。
+- 这里的"环境"指**被测环境**（被测系统部署在哪里），不是执行机（§3.3）。
+- `type`：`dev`（开发）、`test`（测试）、`staging`（预发）、`prod`（生产），必填。
+- `maxVus`、`maxRate`（每秒迭代数）、`maxDurationSec` 是**安全上限**：保护被测环境的护栏，不是负载配置。不管选哪个负载配置，超过上限就被预检拒绝。
+  - 每项为正数或 `null`，`null` 表示不限制。
+  - `type` 为 `prod` 时三项都必填（不能为 `null`）；其他类型可以留空。
 
 **接口 `/api/apis`**
 
@@ -154,7 +159,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 | 方法与路径 | 说明 |
 |---|---|
-| `POST /api/runs` | 发起运行。body：`{ "testId": 1, "profileId": 1, "envId": 1, "note": "" }`。成功返回 201 和运行对象（`status: "running"`） |
+| `POST /api/runs` | 发起运行。body：`{ "testId": 1, "profileId": 1, "envId": 1, "executorId": 1, "confirmProd": false, "note": "" }`。`executorId` 可省略，默认用本机执行机。被测环境类型为 `prod` 时必须带 `"confirmProd": true`，否则预检不通过。成功返回 201 和运行对象（`status: "running"`） |
 | `GET /api/runs?testId=&verdict=&status=&archived=&page=1&pageSize=20` | 列表，按开始时间倒序。返回 `{ "items": [...], "total": 123 }`，列表项不含 `snapshot` 和 `record` |
 | `GET /api/runs/:runId` | 详情，含 `snapshot`、`record`、`artifacts` |
 | `POST /api/runs/:runId/stop` | 停止正在进行的运行（向 k6 发 SIGINT）。不在运行中返回 409 |
@@ -169,7 +174,8 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   "runId": "20260930T101500Z-a1b2c3",
   "testId": 1, "testName": "百度首页冒烟",
   "profileId": 1, "profileName": "冒烟",
-  "envId": 1, "envName": "百度（仅冒烟）",
+  "envId": 1, "envName": "百度（仅冒烟）", "envType": "prod",
+  "executorId": 1, "executorName": "本机执行机",
   "status": "running",
   "verdict": null,
   "startedAt": "2026-09-30T10:15:00.000Z", "endedAt": null,
@@ -199,7 +205,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 1. 测试、负载配置、环境都存在；测试至少有 1 个流程，每个流程至少有 1 个步骤
 2. 环境的 `baseUrl` 是合法的 http / https 地址
-3. 负载配置不超过环境上限：并发（`vus` 或 `preAllocatedVus`）≤ `maxVus`；到达率（`rate`、`startRate`、各 stage 的 `target`）≤ `maxRate`；总时长 ≤ `maxDurationSec`
+3. 负载配置不超过被测环境的安全上限（只检查不为 `null` 的项）：并发（`vus` 或 `preAllocatedVus`）≤ `maxVus`；到达率（`rate`、`startRate`、各 stage 的 `target`）≤ `maxRate`；总时长 ≤ `maxDurationSec`。被测环境类型为 `prod` 时，请求里必须带 `"confirmProd": true`
 4. 负载配置属于 §3.1 的四种形态之一
 5. 流程数量不超过并发：closed 模型下 `vus`（以及固定迭代数形态的 `iterations`）不小于测试的流程数量；open 模型下 `preAllocatedVus` 不小于流程数量（每个流程至少要有 1 个 VU）
 6. 没有其他运行正在进行（否则 409）
@@ -207,7 +213,45 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 测试、负载配置或环境不存在也算预检不通过，返回 422。
 
-### 3.3 其他
+### 3.3 执行机 `/api/executors`
+
+执行机是安装了本项目、实际运行 k6 的机器。目前只有一台：运行后端服务的这台机器（`kind: "local"`），由后端在建库时自动创建。多台执行机属于分布式执行，尚未实现，所以没有新增和删除接口。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `GET /api/executors` | 返回数组（目前恒为 1 项） |
+| `GET /api/executors/:id` | 单个 |
+| `PUT /api/executors/:id` | 只能改 `name` 和 `note` |
+
+```json
+{
+  "id": 1, "name": "本机执行机", "kind": "local", "note": "",
+  "host": "主机名", "ip": "192.168.0.136",
+  "os": "Ubuntu 24.04.4 LTS", "arch": "x86_64",
+  "cpuCores": 4, "memTotalMb": 15900, "memAvailableMb": 7000,
+  "loadAvg1": 0.35, "diskFreeGb": 99.1,
+  "k6Version": "v2.3.0", "k6Path": "/abs/.tools/bin/k6",
+  "pythonVersion": "3.12.2", "uvVersion": "0.11.18",
+  "projectDir": "/abs/仓库根目录", "resultsDir": "/abs/results", "dataDir": "/abs/data",
+  "status": "idle", "runningRunId": null
+}
+```
+
+- `name`、`note` 存库，可修改；其余字段每次请求时实时采集，取不到的给 `null`
+- `status`：`idle | running`
+
+**运行期间的执行机采样**：运行期间后端每秒采样一次本机 CPU 和内存占用，结束时写进最终 Run Record：
+
+```json
+"executor": {
+  "id": 1, "name": "本机执行机", "host": "主机名", "cpuCores": 4, "memTotalMb": 15900,
+  "cpuAvgPct": 12.3, "cpuMaxPct": 41.0, "memMaxPct": 55.2, "samples": 9
+}
+```
+
+没有采到样本时三个百分比为 `null`、`samples` 为 0。目前只作为信息展示，**不参与判定**。plan.json 的 `env` 和最终 Run Record 的 `env` 都增加 `type` 字段。
+
+### 3.4 其他
 
 | 方法与路径 | 返回 |
 |---|---|

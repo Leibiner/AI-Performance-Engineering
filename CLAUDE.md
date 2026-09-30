@@ -4,89 +4,137 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 当前状态
 
-**仓库目前只有文档，没有任何代码。** Phase 0（研究与架构）已完成，Phase 1 尚未开始。因此现在没有 build / lint / test 命令。
+**MVP 已完成并可运行**（2026-09-30）：一个以 k6 为执行引擎的性能测试管理控制台。在页面上维护接口、业务流程、负载配置、验收标准、环境，从页面发起和停止压测，查看判定和指标，结果自动存档。
 
-不要主动开始下一个 Phase 的实现；不要提前创建空目录。每个阶段只创建 `docs/ARCHITECTURE.md` §5.2 中标注给该阶段（`[P1]`、`[P2]`…）的部分。
+- 已实现和未实现的能力以 `docs/ARCHITECTURE.md` §1.1 状态表为准；MVP 相对 Phase 0 原设计的出入见 §1.2。
+- 契约（`docs/plans/mvp-contract.md`）目前比已提交的代码新：执行机、被测环境类型、生产环境二次确认、执行机采样已写进契约，实现还没有完成，清单见 `ARCHITECTURE.md` §1.3。实现并验证后更新相关章节并删除 §1.3。
+- 基线对比、趋势、CI、Prometheus / Grafana、Trace、Evidence Bundle、分布式、任何 AI 功能都**还没有实现**，不要当成已有能力来用或引用。
+- 不要主动开始下一个阶段的实现；不要提前创建空目录（规划中的目录见 `ARCHITECTURE.md` §5.2 末尾的表）。
 
-Phase 1 的运行前提尚未具备：本机没有安装 k6 和 Docker。
+## 命令
 
-## 计划中的命令（Phase 1 实现后才可用）
+都在仓库根目录执行。
 
 ```bash
-# 运行一个测试：同一个 test 换 profile 不改代码
-node tools/run.mjs --system quickpizza --test shop --profile smoke --env local
-node tools/run.mjs --system quickpizza --test shop --profile average --env local --rate 50
+# 环境准备（首次，或升级 k6 / Node 版本后）：uv sync，并把 k6 和 Node 下载到 .tools/，不需要 sudo
+scripts/setup.sh
 
-# 只校验脚本能否解析并输出 options（不发请求）
-k6 inspect perf/systems/quickpizza/tests/shop.test.js
+# 启动 / 停止服务（后台运行，默认 0.0.0.0:8088；前端产物不存在时会先构建）
+scripts/start.sh            # 加 --build 强制重新构建前端；端口用 PORT 环境变量改
+scripts/stop.sh             # 日志在 logs/server.log
+
+# 后端开发启动（前台）。只能单进程，不要加 --workers
+uv run uvicorn server.main:app --host 0.0.0.0 --port 8088
+
+# 前端构建（npm run build 包含 vue-tsc 类型检查）
+source scripts/env.sh && cd web && npm ci && npm run build
+
+# 前端开发服务器：5180 端口，/api 代理到本机 8088（要先启动后端）
+source scripts/env.sh && cd web && npm run dev
+
+# 不发请求，检查一份 plan 能否被引擎接受，并查看生成的 options
+source scripts/env.sh && k6 inspect perf/runner.js -e PLAN_FILE=<plan.json 的绝对路径>
+
+# 不对外发请求地验证后端的运行编排和各个判定分支：用假 k6（用法见脚本开头的注释）
+K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --port 8088
 ```
 
-`run.mjs` 的退出码：0 passed / 1 failed / 2 invalid / 3 error / 4 aborted / 5 预检被拒绝 / 6 相对基线回归。CI 只认这张表，不直接依赖 k6 的退出码。
+没有 lint 和单元测试命令（见下文"禁止过度测试"）。接口文档在 `http://<地址>:8088/api/docs`。示例 plan 在 `perf/examples/`。
 
-实现这些命令时，以 `docs/ARCHITECTURE.md` §3.5、§3.8、§5.4 为准，并在实现后更新本节。
+后端读取的环境变量：`DATA_DIR`（默认 `./data`）、`RESULTS_DIR`（`./results`）、`K6_BIN`（`./.tools/bin/k6`）、`WEB_DIST`（`./web/dist`）、`K6_WEB_DASHBOARD_PORT`（5665）。
+
+## 环境与依赖
+
+- **Python 只用 uv**：依赖写在 `pyproject.toml`，版本锁在 `uv.lock`。加依赖用 `uv add`，运行用 `uv run`。不要用 pip，不要手动激活或修改 `.venv/`。
+- **Node 和 k6 用 `.tools/` 里的**：先 `source scripts/env.sh` 把它们放到 PATH 最前面。系统自带的 Node 是 v18，已停止维护，不要用。版本固定在 `scripts/setup.sh` 开头（k6 v2.3.0、Node v24.21.0），升级只改那里。
+- uv 只管 Python；前端依赖用 npm，只存在于 `web/`。`perf/` 没有 npm，没有构建。
+- 本机没有 sudo 和 Docker。不要写依赖它们的方案。
+- `typescript` 固定为 `~6.0.3`（7.x 与 `vue-tsc` 不兼容），不要升级。
+- `.tools/`、`.venv/`、`data/`、`results/`、`logs/`、`web/dist/`、`web/node_modules/` 都不入 git。
+
+## 三部分如何协作
+
+| 目录 | 是什么 | 入口 |
+|---|---|---|
+| `perf/` | k6 执行引擎：通用脚本读取 `plan.json` 解释执行；`core/` 生成 scenarios、阈值、Run Record | `perf/runner.js` |
+| `server/` | 后端：Python 3.12 + FastAPI + 标准库 `sqlite3`。增删改查、预检、启动和停止 k6、最终判定、存档、托管前端 | `server/main.py` |
+| `web/` | 前端：Vue 3 + TypeScript + Vite + Element Plus + ECharts，8 个页面 | `web/src/router.ts` |
+
+一次运行的路径：页面 `POST /api/runs` → 后端预检 → 把测试、流程、接口、负载配置、环境展开成 `results/<runId>/plan.json`（同时作为快照存库）→ 启动 k6 子进程 → `handleSummary` 写 `run-record.json` → 后端按退出码和 `k6Verdict` 得出最终判定，补全 Run Record 后存库。完整的数据流见 `ARCHITECTURE.md` §3.4。
+
+**三部分之间的唯一约定是 `docs/plans/mvp-contract.md`**（REST 接口、`plan.json`、`run-record.json`、退出码、判定顺序）。**改接口先改契约，再改代码**；`web/src/api/types.ts` 要和契约保持一致。
+
+- `server/` 不 import `perf/`：两边只通过 `plan.json`、命令行参数、退出码和 `results/` 里的文件交互。
+- 前端页面只通过 `web/src/api/` 访问后端，不直接写 fetch。
+- 业务流程是数据，不是代码：新增流程不加文件。`runner.js` 只导出一个执行函数 `runFlow`，用 scenario 名找回对应的流程。
+- 数据在 `data/app.db`（SQLite 单文件）。种子数据在 `server/seed.py`，只在全新的库里写一次；改了种子要删库才会生效。
+
+## 必须遵守的约束
+
+**对百度只允许冒烟流量。** MVP 的压测目标 `https://www.baidu.com` 是第三方线上站点：
+
+- 种子环境"百度（仅冒烟）"的上限是 2 并发、每秒 2 次、60 秒，由后端预检强制执行。**不得调高这个环境的上限**，也不要为了"演示压力测试"新建一个指向第三方站点的宽松环境。
+- 手动运行 k6 时同样遵守：最多 2 个并发，单次不超过 20 次迭代或 15 秒。
+- 不要绕过后端预检直接对外加压。验证后端逻辑用假 k6，检查 plan 用 `k6 inspect`。
+- 百度的 `/s` 会 302 到验证码页，不要用作示例；首页 `/` 可用。
+
+**页面和 Grafana 都不计算判定。** 判定只由确定性规则算出：`perf/core/summary.js` 按阈值类别得出 `k6Verdict`，`server/runs.py` 结合退出码和停止请求得出最终判定（`ARCHITECTURE.md` §4.5）。前端只展示后端返回的结果。`invalid`（测试本身不可信）优先于 `failed`（系统不达标），两者在界面上必须明确区分。
+
+**不要让浏览器连 k6 实时仪表盘。** 只要有浏览器连着 `:5665`，k6 跑完后就不会退出，也不写 summary，运行会一直停在"运行中"。仪表盘只监听 `127.0.0.1`，页面上不嵌入也不链接它；运行中的进度来自 `k6.log`，结束后的图表用导出的 `dashboard.html`。
+
+**业务与负载分开。** 接口和流程的数据模型里不能出现并发、到达率、时长；负载配置里不能出现地址和业务逻辑；它们只在后端组装 plan 时相遇。负载配置必须显式声明 `model: open | closed`。"Scenario" 只指 k6 Scenario，它是 `compose.js` 的编译产物，不手写、不在页面上维护。
+
+**`perf/core/` 不认识任何具体的被测系统**，只依赖 k6 内置模块，不 import `k6/x/*` 或 `k6/experimental/*`。`testid` tag 只在后端启动 k6 时设置一次。ID 类数据和页面上的中文名称不进 tag。
+
+**同一时间只允许 1 个运行；后端只能单进程。** 正在运行的 k6 进程句柄在内存里。向 k6 发信号只能发一次 SIGINT：第二次会让它强制退出且不写 summary。
+
+**禁止过度测试。** 这是用户的决定：不写单元测试套件，不引入测试框架（pytest、vitest、Playwright 等）。验证靠真实运行：引擎用真实 k6 做冒烟，后端用假 k6 走各个判定分支，前端以 `npm run build` 通过为准，最后端到端跑一次。
+
+**提交。** 提交到 `main`。每次提交在 `docs/records/commit-log.md` 最上面记一条（上一条的提交号在这次补上）；过程中用到的技术要点、踩到的坑记入 `docs/records/tech-notes.md`，只记已经验证过的内容。**`git push` 由用户执行**，在 agent 会话里执行会卡在凭据上。
+
+**AI 的硬约束。** 目前没有任何 AI 功能。AI 永不决定判定，不在 k6 运行路径中，不发起压测，不读原始时序；`POST /api/runs` 是给人用的，不向 agent 或 MCP 暴露。是否实现 AI 由 Phase 4 的评估决定（`docs/plans/ai-opportunity-map.md` §5 的 Go / No-Go 条件）。
+
+**不做清单**见 `ARCHITECTURE.md` §12。常见的越界请求：统一协议接口、插件系统、自建监控大盘、多个运行并行、给流程加分支和循环、静态报告、调高百度环境的上限。遇到时先指出与现有决定的冲突（多数对应 ADR-005 的复议条件），由用户决定。
+
+## k6 版本注意事项
+
+基线是 **k6 v2.3.0**。网上大量资料是 v0.x / v1 时代的，以下功能已删除或归档，不要使用：`externally-controlled` executor、`k6/experimental/tracing`、`k6/experimental/redis`、`--no-summary`、xk6-amqp、xk6-disruptor、xk6-output-timescaledb、k6chaijs。
+
+实测过的行为（细节在 `docs/records/tech-notes.md` §2）：
+
+- `handleSummary` 拿到的仍是旧结构（顶层 `metrics`、`root_group`、`options`、`state`）；新结构要显式加 `--new-machine-readable-summary`。
+- 子指标（如 `http_req_duration{step:f1s1}`）只有被阈值引用才会出现在 summary 里，所以每个步骤都有占位阈值。
+- 退出码：0 阈值全过；99 有阈值未过（未达标和测试无效都是 99）；107 plan 无效或脚本异常；105 被中断。
+- `open()` 的相对路径相对脚本所在目录，所以 `PLAN_FILE` 必须是绝对路径。
+- 到达率必须是整数，小数到达率用 `timeUnit` 换算。
+
+研究阶段的结论和来源见 `docs/research/k6.md` 与 `docs/research/k6-ecosystem.md`。
 
 ## 文档结构与维护规则
 
 ```text
 docs/ARCHITECTURE.md   L1 唯一的架构与总体说明；与其他文档冲突时以它为准
-docs/decisions/        L2 ADR：为什么这样设计
-docs/plans/            L2 roadmap.md（阶段、验收、停止条件）、ai-opportunity-map.md
+docs/decisions/        L2 ADR-001–005：为什么这样设计（ADR-004 的"只读"已被 ADR-005 取代）
+docs/plans/            L2 roadmap.md、mvp-plan.md、mvp-contract.md（三方接口约定）、ai-opportunity-map.md
+docs/records/          L2 commit-log.md（提交记录）、tech-notes.md（技术笔记）
 docs/research/         L3 研究记录与来源；只作为依据，不随实现频繁更新
 ```
 
-- **架构说明只保留一份**。新的架构内容写进 `ARCHITECTURE.md`，不要新建平行的架构文档。
-- 改动 `ARCHITECTURE.md` 时要同步：§1 状态表、§5.2 目录树、§11 路线图摘要、§12 不做清单、`plans/roadmap.md`，必要时新增 ADR。
-- 其他文档按章节号引用 `ARCHITECTURE.md`（如 `§4.7`、`§5.2`、`§6`、`§8`）。插入或调整顶级章节后，用 grep 检查并修正这些引用。
-- §1 状态表必须如实反映"已完成 / 未实现"，不能把设计写成已有能力。
+- **架构说明只保留一份**。新的架构内容写进 `ARCHITECTURE.md`，不要新建平行的架构文档。接口字段级的细节只写在 `mvp-contract.md`，不在 `ARCHITECTURE.md` 里重复。
+- 代码改动影响到架构时，同步 `ARCHITECTURE.md`：§1.1 状态表、§5.2 目录树、§8（页面和接口）、§10 技术基线、§11 路线图摘要、§12 不做清单，以及 `plans/roadmap.md`。
+- §1.1 状态表必须如实反映"已实现 / 未实现"。没做的能力要标"规划，未实现"，不能把设计写成已有能力。
+- 改变已有决定时新增或修订 ADR，而不是只改正文。被取代的 ADR 不删除，在开头标明被哪份 ADR 取代。
+- 其他文档按章节号引用 `ARCHITECTURE.md`（如 `§4.7`、`§5.2`、`§6`、`§8.5`）。调整章节后，用 grep 检查并修正这些引用。
+- 研究文档里被实测推翻的 [推测]，改成实测结论并注明日期。
 - 文档语言：中文为主，技术名词保留英文；图用 Mermaid；研究类结论标注 **[事实]**（带来源）/ **[判断]** / **[推测]**。
-- 改变已有决定时新增或修订 ADR，而不是只改正文。
-
-## 架构要点（实现时必须遵守）
-
-完整内容见 `docs/ARCHITECTURE.md`，以下是跨多个章节才能看出的核心约束。
-
-**项目定位**：以 k6 v2.x 为执行引擎的 Performance Engineering 框架。项目不重新实现、也不包装 k6 API，只在两处工作：生成 `options`（输入端），以及用 `handleSummary` + `tools/run.mjs` 把一次运行变成 Run Record（输出端）。
-
-**术语**：业务场景叫 **Flow**。"Scenario" 只指 k6 Scenario，它是 Composer 的编译产物，不手写，所以没有 `scenarios/` 目录。
-
-**Business Model ≠ Load Model**，两条线只在 Composer 交汇：
-
-- 业务线：Service（做什么）→ Flow（顺序）→ Flow Mix（比例）
-- 负载线：Load Profile（形状、`model: open | closed`）→ Executor → VU
-- Flow / Service 中不能出现 executor、VU、rate、duration；Profile 中不能出现 URL 或业务逻辑。
-
-**代码分层**（依赖只能向下）：
-
-- `perf/core/`（L0）只依赖 k6 内置模块，不认识任何业务系统，不 import `k6/x/*` 或 `k6/experimental/*`
-- `perf/profiles/`（L1）纯数据，所有被测系统共用
-- `perf/systems/<sys>/`（L2/L3）services、flows、data、metrics、slo、env、tests
-- `tools/`：Node.js，仅标准库；与 `perf/` 只通过 CLI 参数和 `results/` 文件交互，互不 import
-- `web/`、`server/`（Phase 2）：展示侧，只通过 Run Record（`schemas/run-record.schema.json`）与执行侧关联；npm 和构建步骤只允许出现在这两个目录
-
-**判定（Verdict）**：`passed / failed / invalid / error / aborted`，由确定性规则计算。阈值分两类：SLO 阈值（系统是否达标）和 validity 阈值（本次测试是否可信，如 `dropped_iterations`）。`invalid` 优先于 `failed`。
-
-**数据规则**：选数据只用 `exec.vu.idInTest` 和 `exec.scenario.iterationInTest`，禁止用 `__VU` / `idInInstance`（分布式下不唯一）。ID 类数据不进 tag。`testid` tag 只在 Run 入口设置一次。
-
-**负载模型**：SLO 验证默认用 arrival-rate（open）；选 closed 要写明理由。
-
-**展示层只读**：Web 控制台和 Grafana 都不计算判定、不写 Run Record、不触发压测。每类数据只有一个事实来源：判定在 Run Record，时序在 Prometheus，调用链在 Tempo。
-
-**AI 的硬约束**：Phase 1–3 不实现任何 AI 功能。AI 永不决定 Verdict，不在 k6 运行路径中，不发起压测，不读原始时序；只读消费 Run Record / Evidence Bundle。是否实现由 Phase 4 的评估决定（`docs/plans/ai-opportunity-map.md` §5 的 Go/No-Go 条件）。
-
-**不做清单**见 `ARCHITECTURE.md` §12。常见的越界请求：统一协议接口、插件系统、Flow 的 YAML DSL、自建监控大盘、页面触发压测。遇到时先指出与现有决定的冲突。
-
-## k6 版本注意事项
-
-基线是 **k6 v2.x**（研究时最新为 v2.3.0）。网上大量资料是 v0.x / v1 时代的，以下功能已删除或归档，不要使用：`externally-controlled` executor、`k6/experimental/tracing`、`k6/experimental/redis`、`--no-summary`、xk6-amqp、xk6-disruptor、xk6-output-timescaledb、k6chaijs。
-
-细节和来源见 `docs/research/k6.md` 与 `docs/research/k6-ecosystem.md`。
 
 ## 未决事项
 
 动到相关设计前先向用户确认：
 
-- **存储形态**：Run Record 存文件，还是从 Phase 2 起把运行汇总存入 PostgreSQL（`ARCHITECTURE.md` §3.9）
-- **CI 平台**：GitHub Actions / GitLab CI / Jenkins，Phase 2 决定
-- **前端技术栈**：React + TypeScript + Vite + Ant Design + ECharts 是推荐方案，Phase 2 开始时复核（ADR-004）
-- **TOB 目标系统**：自建多租户 mock 还是接入真实系统，Phase 2 决定
-- **Phase 1 需要实测的两项**：k6 v2 的 `handleSummary` 数据结构；QuickPizza 的登录 / token 流程
+- **自有目标系统**：百度只能冒烟，不能产生性能结论。需要一个可以自由加压的目标（本机没有 Docker 和 sudo，QuickPizza 没有采用）。
+- **登录与权限**：现在没有，服务监听 `0.0.0.0`，环境上限可以在页面上修改。多人使用或暴露到不可信网络之前必须先做（ADR-005）。
+- **CI 的入口和平台**：没有命令行入口。是让 CI 调用后端接口，还是"plan 文件 + 命令行"（`ARCHITECTURE.md` §3.8）；平台未定。
+- **基线、历史、实验记录的存储形态**：放数据库，还是放 git 以保留审核（`ARCHITECTURE.md` §3.7）。
+- **流程的表达力**：需要分支、循环、轮询或数据集时，是扩展数据模型，还是引入手写 JS 模块作为第二种流程类型（ADR-005）。
+- **TOB 目标系统**：自建多租户 mock 还是接入真实系统。

@@ -1,7 +1,14 @@
 # ADR-003：技术基线 —— k6 v2.x、原生 ES Module、无构建步骤、演示目标系统
 
-- 状态：**Accepted**（Phase 1 开始时复核版本号）
+- 状态：**Accepted，部分被 ADR-005 修订**（2026-09-30）
 - 日期：2026-09-29
+- 修订：2026-09-30，MVP 按 ADR-005 实现后，下表中以下几行**不再有效**，以 ADR-005 和 `ARCHITECTURE.md` §10 为准：
+  - "k6 外部工具：Node.js，仅标准库" → 后端是 Python 3.12 + FastAPI + 标准库 `sqlite3`，依赖由 uv 管理；没有 `tools/` 目录；
+  - "前端与只读 API" → 前端是可维护的管理控制台，npm 和构建只在 `web/`；
+  - "TypeScript 暂不采用" → 前端用 TypeScript；`perf/` 仍是原生 JS ES Module、无构建；
+  - "运行结果存储：本地 JSON 文件，无需数据库" → SQLite 单文件 `data/app.db` + `results/<runId>/` 产物；
+  - "Phase 1 目标系统：QuickPizza" → MVP 的目标是 `https://www.baidu.com`，仅冒烟；QuickPizza 因本机没有 Docker 和 sudo 未采用，Consequences 中与 QuickPizza 有关的两条随之失效。
+- 仍然有效：k6 v2.x 并固定 minor 版本（已实测定为 v2.3.0）、`perf/` 无构建、扩展与禁用清单、断言方式、OpenTelemetry Demo 作为后续目标系统的候选、TOB 目标系统缺口。下文正文保留原样，作为历史记录。
 - 相关：`research/k6.md` §0、§7；`research/k6-ecosystem.md` §1、§4
 
 ---

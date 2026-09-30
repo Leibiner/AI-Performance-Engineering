@@ -3,6 +3,7 @@
 - 状态：**Accepted**
 - 日期：2026-09-29
 - 修订：2026-09-30，Option B 中"Web UI"一项由 ADR-004 修订为"分阶段引入只读 Web 控制台"。Architecture First 的方向和对 AI 的约束不变。
+- 再次修订：2026-09-30，ADR-005 取代了 ADR-004 的"只读"原则：MVP 是可维护的管理控制台，Option B 清单里的 Web UI、服务端、数据库以最小形态采用（单进程后端、SQLite 单文件）；插件系统、分布式控制器、Observability 平台、Agent Runtime 仍然不做。Consequences 中"需要维护一套目标系统（QuickPizza…）"一条里，QuickPizza 未采用，MVP 的目标是百度（仅冒烟）。Architecture First 的方向和对 AI 的约束仍然不变。
 - 相关：`research/ai-performance-engineering.md`、`plans/ai-opportunity-map.md`、`ARCHITECTURE.md`
 
 ---

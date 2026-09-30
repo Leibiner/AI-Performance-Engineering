@@ -1,7 +1,8 @@
 # ADR-002：核心模型 —— Flow ⟂ Load Profile，Verdict 区分 Invalid
 
-- 状态：**Accepted**
+- 状态：**Accepted**（实现方式由 ADR-005 调整）
 - 日期：2026-09-29
+- 修订：2026-09-30，MVP 按 ADR-005 实现。八条决定的方向不变，实现上有三点出入：Service 和 Flow 从手写的 JS 模块变成了页面上维护的数据（接口、业务流程），由通用脚本解释执行，所以下文"用 DSL 描述 Flow"被拒绝的理由（需要分支）现在是已知的代价；决定 4（强度与形状分离）尚未实现，负载配置里直接写绝对数值；决定 8（数据选择规则）尚无使用场景。详见 ADR-005"对已有 ADR 的影响"。
 - 相关：`ARCHITECTURE.md`、`research/k6.md` §3、`research/k6-ecosystem.md` §6
 
 ---

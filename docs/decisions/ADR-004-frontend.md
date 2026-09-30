@@ -1,8 +1,13 @@
 # ADR-004：前端 —— 静态报告 + 只读 Web 控制台，分阶段引入
 
-- 状态：**Accepted**（技术选型在 Phase 2 开始时复核）
+- 状态：**Superseded in part —— 主要部分已被 ADR-005 取代**（2026-09-30）
 - 日期：2026-09-30
 - 相关：`ARCHITECTURE.md` §3.9、§8；修订 ADR-001 中"不做 Web UI"的部分；对 ADR-003"无构建步骤"增加例外
+- 被取代的说明：本 ADR 写成当天，用户决定先做可维护的管理控制台，MVP 已按 ADR-005 实现。下文正文保留原样，作为历史记录；其中以下内容**不再有效**：
+  - Decision 的约束 1、2、4、5（前端和 API 只读、只读 API 与 `schemas/` 契约、定义只走 git 和 PR、前端和 API 可整体移除）以及约束 6 里的 `tools/`；
+  - 分阶段里的 F0（静态报告）、F1（只读控制台）、F3（页面发起压测只调用 CI，且必须先有登录和权限）；
+  - 技术选型（React + Ant Design，API 用 Node.js）→ 实际是 Vue 3 + TypeScript + Vite + Element Plus + ECharts，后端 Python + FastAPI。
+- 仍然有效：前端不计算判定和回归；不重画时序监控大盘；`invalid` 与 `failed` 在界面上明确区分；F2（趋势、证据视图）和 F4（AI 建议面板，需先通过评估）仍是规划；npm 和构建步骤不进入 `perf/`。
 
 ---
 
@@ -87,5 +92,5 @@ Phase 0 的最初设计把 "Web UI" 整体列为不做，查看结果依赖三�
 
 - F1 上线后访问量很低（大家只看 CI 通知和 report.html）→ 不做 F2，保留 F0 / F1；
 - 采用 Grafana Cloud k6 → 评估用其自带界面替代 F1 的部分页面；
-- 非工程师需要自助发起压测，或 CLI / CI 触发成为瓶颈 → 启动 F3，并先落实护栏（`ARCHITECTURE.md` §8.8）；
+- 非工程师需要自助发起压测，或 CLI / CI 触发成为瓶颈 → 启动 F3，并先落实护栏（`ARCHITECTURE.md` §8.5；写作本 ADR 时是 §8.8）；
 - Grafana 面板嵌入不可行 → 退回链接方式，并重新评估是否在前端画少量关键曲线。
