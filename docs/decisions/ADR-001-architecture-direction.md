@@ -2,6 +2,7 @@
 
 - 状态：**Accepted**
 - 日期：2026-09-29
+- 修订：2026-09-30，Option B 中"Web UI"一项由 ADR-004 修订为"分阶段引入只读 Web 控制台"。Architecture First 的方向和对 AI 的约束不变。
 - 相关：`research/ai-performance-engineering.md`、`plans/ai-opportunity-map.md`、`ARCHITECTURE.md`
 
 ---

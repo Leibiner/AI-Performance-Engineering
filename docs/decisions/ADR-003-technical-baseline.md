@@ -22,6 +22,7 @@
 | 测试代码语言 | **JavaScript ES Module**（k6 原生），不引入构建步骤 | 最少工具链；TS 无类型检查的收益有限 |
 | TypeScript | 暂不采用；Phase 2 复核（若需要类型检查则加入 `tsc --noEmit` 作为 lint，而非构建） | 避免过早引入工具链 |
 | k6 外部工具（Run 入口、Compare） | **Node.js，仅标准库**（无 npm 依赖） | 与测试代码同语言；环境已具备；零依赖 |
+| 前端与只读 API（`web/`、`server/`，Phase 2） | 允许 npm 依赖和构建步骤，仅限这两个目录（ADR-004） | 展示侧与执行侧只通过 Run Record 关联，互不 import |
 | 扩展 | 默认不使用；需要时 CI 中关闭自动解析，使用固定版本 `grafana/xk6` 镜像 | 可复现 |
 | 禁用 | `k6/experimental/*` 不进入 Core；不使用已删除/归档功能（`externally-controlled`、`k6/experimental/tracing`、`k6/experimental/redis`、xk6-amqp、xk6-disruptor） | 稳定性 |
 | 断言 | k6 `check` + 阈值；如需 `expect` 使用 k6 2.0 Assertions（`k6-testing` jslib） | 官方当前推荐；k6chaijs 已废弃 |

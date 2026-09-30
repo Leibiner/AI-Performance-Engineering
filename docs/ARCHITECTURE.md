@@ -1,7 +1,7 @@
 # AI Performance Engineering：架构与总体说明
 
-> 本文是项目**唯一**的架构与总体说明文档。其他文档都是它的支撑材料（见 §12 文档分层）。
-> 更新日期：2026-09-29 ｜ k6 基线：v2.3.0 ｜ 当前阶段：**Phase 0 完成（只有研究与设计，没有代码）**
+> 本文是项目**唯一**的架构与总体说明文档。其他文档都是它的支撑材料（见 §13 文档分层）。
+> 更新日期：2026-09-30 ｜ k6 基线：v2.3.0 ｜ 当前阶段：**Phase 0 完成（只有研究与设计，没有代码）**
 
 ---
 
@@ -20,13 +20,16 @@
 | 运行记录（runId、环境指纹、结果 JSON） | ❌ 未实现 | Phase 1 |
 | 执行：预检、目标白名单、超时与手动中止 | ❌ 未实现 | Phase 1 |
 | 监控：k6 web-dashboard 实时观察 + 负载机采样 | ❌ 未实现 | Phase 1 |
-| 汇总与报告：Run Record → report.md + HTML | ❌ 未实现 | Phase 1 |
+| 汇总与报告：Run Record → report.md + report.html（静态报告页） | ❌ 未实现 | Phase 1 |
 | 多业务流混合、测试数据生命周期、基线与回归比较 | ❌ 未实现 | Phase 2 |
 | CI：PR 冒烟门禁、Nightly 回归、通知、基线更新流程 | ❌ 未实现 | Phase 2 |
 | 监控：Prometheus/Grafana（k6 + 被测系统 RED/USE） | ❌ 未实现 | Phase 2 |
+| 前端：Web 控制台（首页、运行列表、运行详情、对比、基线、实验），只读 | ❌ 未实现（已规划，§8） | Phase 2 |
 | Trace 关联、Evidence Bundle、趋势与变点检测 | ❌ 未实现 | Phase 3 |
+| 前端：趋势与变点、证据视图、测试目录 | ❌ 未实现（已规划，§8） | Phase 3 |
 | AI 能力 | ❌ 不实现，Phase 4 先做评估 | Phase 4–5（仅评估通过的） |
 | 分布式执行 | ❌ 按需触发 | 条件触发 |
+| 前端：从页面触发压测、登录与权限 | ❌ 按需触发（§8.8） | 条件触发 |
 
 **运行前提（尚未具备）**：本机未安装 k6 与 Docker；Phase 1 第一步需安装 k6 v2.x 并启动目标系统 QuickPizza。
 
@@ -40,7 +43,9 @@
 Hypothesis → Experiment（Flow × Load Profile × Data × Env × SLO）→ k6 Run → Run Record → Verdict → Baseline Comparison → Conclusion
 ```
 
-**不是**：k6 的替代品；"AI 自动压测工具"；Observability 平台；Web UI / SaaS。
+**不是**：k6 的替代品；"AI 自动压测工具"；Observability 平台；在线压测 SaaS 平台。
+
+项目有前端（§8），但它是**查看运行和结论的只读控制台**，不是在页面上编排和发起压测的平台。
 
 ### 和直接写 k6 脚本的区别
 
@@ -63,7 +68,7 @@ Hypothesis → Experiment（Flow × Load Profile × Data × Env × SLO）→ k6 
 总体架构分两个视图：
 
 - **逻辑视图**（§3.1）：由哪些组件组成、组件之间怎么依赖；
-- **运行视图**（§3.2–3.8）：一次测试从触发到归档，经过执行、监控、汇总、判定、报告、CI 的完整链路。
+- **运行视图**（§3.2–3.9）：一次测试从触发到归档，经过执行、监控、汇总、判定、报告、CI 的完整链路。
 
 ### 3.1 逻辑架构
 
@@ -101,6 +106,7 @@ flowchart TB
     end
 
     AIX[AI（未实现）<br/>只读消费 Result / Evidence]
+    WEB[Web 控制台（P2，只读）<br/>运行 / 结论 / 对比 / 趋势]
 
     SVC --> FLOW
     DATA --> FLOW
@@ -113,6 +119,8 @@ flowchart TB
     SUT -.-> PROM
     SUT -.-> TR
     REC --> BASE --> EXP
+    REC -.只读 API.-> WEB
+    PROM -.嵌入面板.-> WEB
     REC -.只读.-> AIX
     PROM -.只读.-> AIX
     AIX -.建议 + 证据引用.-> EXP
@@ -131,7 +139,7 @@ flowchart LR
     E --> M["④ 监控<br/>负载机健康<br/>负载是否达标<br/>被测系统 RED/USE<br/>自动 / 手动中止"]
     M --> C["⑤ 汇总<br/>handleSummary<br/>Run Record<br/>多实例合并"]
     C --> V["⑥ 判定<br/>Verdict<br/>有效性审计<br/>基线对比"]
-    V --> R["⑦ 报告<br/>report.md<br/>HTML dashboard<br/>CI Summary<br/>通知"]
+    V --> R["⑦ 报告<br/>report.md / report.html<br/>Web 控制台<br/>CI Summary<br/>通知"]
     R --> A["⑧ 归档<br/>results/<br/>history/<br/>baselines/<br/>experiments/"]
     V -->|退出码| T
 ```
@@ -144,7 +152,7 @@ flowchart LR
 | ④ 监控 | 实时观察，异常时中止 | k6 web-dashboard、阈值中止、`run.mjs` | 终端进度 + web-dashboard + 负载机采样 | Prometheus + Grafana | Trace |
 | ⑤ 汇总 | 把一次运行变成 Run Record | `core/summary.js` + `run.mjs` | 单实例 | 重复运行汇总 | 多实例合并 |
 | ⑥ 判定 | Verdict、有效性审计、基线对比 | `core/summary.js`、`tools/compare.mjs` | Verdict | + 基线对比 | + 变点检测（CPD） |
-| ⑦ 报告 | 人可读的结果与链接 | `tools/report.mjs`、k6 HTML 导出 | report.md + HTML | + CI Summary + 通知 | + Evidence Bundle |
+| ⑦ 报告 | 人可读的结果与链接 | `tools/report.mjs`、k6 HTML 导出、Web 控制台（§8） | report.md + report.html | + Web 控制台 + CI Summary + 通知 | + 趋势、证据视图 |
 | ⑧ 归档 | 保存结果、历史、基线 | 文件系统 / CI 制品 | `results/` | + `history/`、`baselines/`、`experiments/` | — |
 
 ### 3.3 k6 的位置
@@ -286,10 +294,12 @@ flowchart TB
 | 输出 | 内容 | 阶段 |
 |---|---|---|
 | `results/<runId>/report.md` | Verdict；按类别列出的阈值结果；每个 flow/step 的关键指标；有效性检查；与基线的差值（P2）；Grafana 链接（带 testid 与时间窗，P2） | P1 |
+| `results/<runId>/report.html` | 与 report.md 内容相同的静态报告页：单文件、自包含、无后端，浏览器直接打开（§8.2） | P1 |
 | `results/<runId>/dashboard.html` | k6 web-dashboard 导出的图表 | P1 |
 | 终端输出 | Verdict + 失败阈值 + 报告路径 | P1 |
 | CI Job Summary | report.md 的内容 | P2 |
-| 通知（webhook） | 夜间任务出现 `failed` / `invalid` / 回归时发送 | P2 |
+| 通知（webhook） | 夜间任务出现 `failed` / `invalid` / 回归时发送，带运行详情页链接 | P2 |
+| Web 控制台 | 运行列表、运行详情、对比、基线、实验（§8） | P2 |
 
 报告由模板从 Run Record **确定性生成**，同一个 Run Record 永远生成同样的报告。
 
@@ -300,6 +310,7 @@ results/<runId>/                 单次运行（git 忽略；CI 中作为制品�
 ├── run-record.json              项目 Run Record（报告、对比、未来 AI 的唯一输入）
 ├── k6-summary.json              k6 原始 summary（排查用）
 ├── report.md
+├── report.html
 ├── dashboard.html
 └── k6.log
 history/<system>/<test>.<env>.jsonl   每次运行一行摘要，用于趋势和 CPD      [P2]
@@ -378,7 +389,8 @@ k6 自己的退出码（99、107 等）由 `run.mjs` 翻译成上表，CI 不直
 1. **不把所有数据搬进一个存储**。时序、运行记录、调用链的查询方式完全不同，强行合并只会多出一个需要维护的系统。
 2. **统一关联键**：所有数据都带 `testid`（= runId）和运行时间窗；需要细分时再加 `flow`、`step`、`lg`。有了关联键，任何一处的数据都能定位到其他地方的对应数据。
 3. **统一查看入口**：人只从一个地方进入，其余数据通过已经带好 testid 和时间窗的链接跳转。
-4. **每类数据只有一个事实来源**：判定只在 Run Record 中；时序只在 Prometheus 中；调用链只在 Tempo 中。Grafana 只负责展示，**不重新计算判定**。
+4. **每类数据只有一个事实来源**：判定只在 Run Record 中；时序只在 Prometheus 中；调用链只在 Tempo 中。前端和 Grafana 都只负责展示，**不重新计算判定**。
+5. **分工**：**Web 控制台**（§8）是运行和结论的入口；**Grafana** 是时序曲线的钻取工具，以嵌入或链接的方式出现在控制台里。
 
 #### 架构
 
@@ -392,69 +404,70 @@ flowchart LR
     end
     subgraph STORE["存储（各自是唯一事实来源）"]
         PROM[(Prometheus<br/>时序)]
-        FILES[(results/ history/<br/>Run Record)]
+        RS[(Run Store<br/>Run Record / 历史 / 基线)]
         TEMPO[(Tempo / Loki<br/>调用链 / 日志)]
     end
-    subgraph VIEW["唯一入口：Grafana"]
-        LIST[Runs 列表<br/>所有运行：test / profile / 判定 / p95]
-        OV[Run Overview<br/>变量 testid，时间范围自动对齐]
+    GRAF[Grafana<br/>Run Overview 仪表盘<br/>变量 testid，时间范围自动对齐]
+    subgraph VIEW["唯一入口：Web 控制台（P2）"]
+        LIST[运行列表<br/>test / profile / 判定 / p95]
+        DETAIL[运行详情<br/>结论 + 嵌入的时序面板]
     end
     K6 -->|remote write| PROM
     LG -->|node_exporter| PROM
     SUT -->|exporters| PROM
     SUT -->|traces / logs| TEMPO
-    RUN -->|Run Record| FILES
-    RUN -->|开始 / 结束标注<br/>含判定和报告链接| OV
-    PROM --> OV
-    FILES --> LIST
-    FILES --> OV
-    TEMPO --> OV
-    LIST -->|点击一行| OV
-    RPT[report.md] -->|带 testid + 时间窗的链接| OV
+    RUN -->|Run Record| RS
+    RUN -->|开始 / 结束标注| GRAF
+    PROM --> GRAF
+    TEMPO --> GRAF
+    RS -->|只读 API| LIST
+    RS -->|只读 API| DETAIL
+    GRAF -->|嵌入 / 链接| DETAIL
+    LIST -->|点击一行| DETAIL
+    RPT[报告 / CI 通知] -->|链接| DETAIL
 ```
 
-#### Run Overview 仪表盘（一次运行的全部信息在一页）
+#### 运行详情页与 Grafana 仪表盘的分工
 
-| 行 | 内容 | 数据来源 | 阶段 |
-|---|---|---|---|
-| 1 结论 | 判定、失败的阈值、有效性检查结果、与基线的差值、报告链接 | Run Record | P2 |
-| 2 负载 | 目标 vs 实际到达率、VU、`dropped_iterations` | Prometheus（k6） | P2 |
-| 3 业务结果 | 每个 Flow/Step 的 p95/p99、错误率、业务成功率，SLO 线叠加显示 | Prometheus（k6） | P2 |
-| 4 负载机 | CPU、内存、网络（多台负载机按 `lg` 分开） | Prometheus（node_exporter） | P2 |
-| 5 被测系统 RED | 每个服务的请求量、错误、延迟 | Prometheus | P2 |
-| 6 被测系统 USE | CPU、内存、连接池、DB、Redis、MQ lag | Prometheus | P2 |
-| 7 调用链 / 日志 | 按 testid 过滤的慢调用链、错误日志 | Tempo / Loki | P3 |
+| 区块 | 内容 | 数据来源 | 展示位置 | 阶段 |
+|---|---|---|---|---|
+| 1 结论 | 判定、失败的阈值、有效性检查结果、与基线的差值、附件链接 | Run Record | Web 控制台 | P2 |
+| 2 负载 | 目标 vs 实际到达率、VU、`dropped_iterations` | Prometheus（k6） | Grafana Run Overview，嵌入控制台 | P2 |
+| 3 业务结果 | 每个 Flow/Step 的 p95/p99、错误率、业务成功率，SLO 线叠加显示 | Prometheus（k6） | 同上 | P2 |
+| 4 负载机 | CPU、内存、网络（多台负载机按 `lg` 分开） | Prometheus（node_exporter） | 同上 | P2 |
+| 5 被测系统 RED | 每个服务的请求量、错误、延迟 | Prometheus | 同上 | P2 |
+| 6 被测系统 USE | CPU、内存、连接池、DB、Redis、MQ lag | Prometheus | 同上 | P2 |
+| 7 调用链 / 日志 | 按 testid 过滤的慢调用链、错误日志 | Tempo / Loki | Grafana，从控制台跳转 | P3 |
 
-整页的时间范围由运行时间窗决定，所有行自动对齐，不需要手动对时间。
+时序面板的时间范围由运行时间窗决定，所有面板自动对齐，不需要手动对时间。
 
 #### 各阶段的唯一入口
 
 | 阶段 | 运行中 | 运行后 | 跨运行 |
 |---|---|---|---|
-| **P1** | k6 实时仪表盘（`localhost:5665`） | **`results/<runId>/report.md`**：判定、指标、负载机状态、有效性检查汇总在一个文件，并链接 `dashboard.html` | 暂无（手动对照报告） |
-| **P2** | Grafana Run Overview | Grafana Run Overview（report.md 和 CI 通知中都带链接） | Grafana Runs 列表 + 基线对比 |
-| **P3** | 同上 + 调用链 | 同上 + Evidence Bundle 链接 | + 趋势 / 变点 |
+| **P1** | k6 实时仪表盘（`localhost:5665`） | **`results/<runId>/report.html`**：判定、指标、负载机状态、有效性检查汇总在一个页面，并链接 `dashboard.html`（同内容的 report.md 供终端和 CI 使用） | 暂无（手动对照报告） |
+| **P2** | Web 控制台运行详情（嵌入 Grafana 实时面板） | Web 控制台运行详情（报告和 CI 通知中都带链接） | Web 控制台：运行列表、对比、基线 |
+| **P3** | 同上 + 调用链跳转 | 同上 + 证据视图 | + 趋势 / 变点 |
 
 #### 实现要点（P2）
 
-- `run.mjs` 在运行开始和结束时通过 Grafana HTTP API 写**标注**（annotation），内容包括 testid、test、profile、判定和报告链接。任何 Grafana 图表上都能看到"这段时间在跑哪次压测"。
-- Run Record 进入 Grafana 的方式：用 Grafana 的 **Infinity 数据源**读取以静态 HTTP 方式提供的 `results/` 和 `history/` JSON，**不引入数据库**。该插件的当前维护状态和用法在 Phase 2 开始时验证。
+- `run.mjs` 在运行开始和结束时通过 Grafana HTTP API 写**标注**（annotation），内容包括 testid、test、profile 和判定。任何 Grafana 图表上都能看到"这段时间在跑哪次压测"。
+- Run Record 通过只读 API 提供给控制台（§8.5）。之前设想的"用 Grafana Infinity 数据源读 JSON 文件"不再需要。
+- Grafana 只保留一个 Run Overview 仪表盘（时序部分），JSON 放在 `infra/observability/dashboards/`，纳入 git 管理。
 - Prometheus 的保留期有限（默认 15 天），过期后旧运行的时序曲线会消失，但 Run Record 中的汇总永久保留。长期对比只依赖 Run Record。
-- 仪表盘以 JSON 形式放在 `infra/observability/dashboards/`，纳入 git 管理。
+- Grafana 不可用时，控制台的结论部分照常可用，只是没有曲线。
 
-#### 何时引入数据库
+#### 存储形态（未决）
 
-出现以下任一情况时，把 Run Record 存入 PostgreSQL（Grafana 原生支持，Apache Otava 也支持读取）：
+当前设计是 Run Record 存文件（`results/`、`history/`）。已经提出"从 Phase 2 起把运行汇总存入 PostgreSQL、k6 原始样本压缩存文件"的方案（跨运行查询、趋势、Apache Otava 都可以直接读库），**尚未确认**。
 
-- 运行数量增长后，基于文件的查询明显变慢；
-- 需要跨运行的复杂查询（按版本、环境、时间段组合筛选）；
-- 多个团队需要共享同一份运行历史。
+控制台只通过只读 API 读取数据，存储从文件换成数据库时前端不用改。
 
 #### 不做
 
-- 不自建 Web UI 或聚合服务：Grafana 已经能同时连接这些数据源；
+- 不在控制台里重画 Grafana 已有的时序图表；
 - 不把 trace_id、userId 放进 Prometheus 标签：基数会爆炸（§4.4）；
-- 不在 Grafana 中重新计算判定：避免出现两个"事实"。
+- 不在前端或 Grafana 中重新计算判定：避免出现两个"事实"。
 
 ---
 
@@ -617,8 +630,12 @@ flowchart TB
 | **L2 SLO / Env / Metrics** | `perf/systems/<sys>/slo.js`、`env/`、`metrics.js` | SLO 数据、环境地址、业务指标注册 | core（metrics 仅 k6/metrics） | flows、services |
 | **L3 Test** | `perf/systems/<sys>/tests/` | 组装：Flow Mix + SLO + 目标强度；导出 `options`、Flow 函数、`handleSummary` | 以上全部 | — |
 | **Tools** | `tools/` | k6 之外：预检、调用 k6、负载机采样、补全 Run Record、报告、基线对比；CI 只调用这些脚本 | Node 标准库 | perf/ 下任何模块（只通过 CLI 和文件交互） |
+| **Server** | `server/` | 只读 API：把 Run Store 中的运行记录、历史、基线、实验提供给前端 | Run Store、`schemas/` | perf/、tools/；不调用 k6；不写 Run Record |
+| **Web** | `web/` | Web 控制台：展示运行、结论、对比、趋势 | 只读 API、Grafana（嵌入 / 链接） | 直接读文件或数据库；perf/、tools/ |
 
 **依赖只能向下**。L0 不认识任何业务系统；L1 不认识任何 Flow；Flow 不认识任何 Profile。这三条是 Business Model ≠ Load Model 在代码层面的落地。
+
+`web/` 和 `server/` 是展示侧，与执行侧（`perf/`、`tools/`）之间**只通过 Run Record 这一份数据契约**（`schemas/run-record.schema.json`）关联，互不 import。
 
 ### 5.2 仓库目录结构
 
@@ -669,10 +686,25 @@ AI-Performance-Engineering/
 │
 ├── tools/                             k6 之外的工具（Node.js，仅标准库）
 │   ├── run.mjs                        ①–⑤ 触发、预检、执行、负载机采样、补全 Run Record、退出码  [P1]
-│   ├── report.mjs                     ⑦ Run Record → report.md（模板，确定性）    [P1]
+│   ├── report.mjs                     ⑦ Run Record → report.md + report.html（模板，确定性）  [P1]
 │   ├── check.mjs                      静态检查：边界检查清单 + k6 inspect         [P2]
 │   ├── compare.mjs                    ⑥ 重复运行汇总 + 基线对比                   [P2]
 │   └── baseline.mjs                   把指定 runId 提升为基线（生成 PR 变更）      [P2]
+│
+├── schemas/
+│   └── run-record.schema.json         Run Record 的 JSON Schema：tools、API、前端共同遵守的契约  [P1]
+│
+├── web/                               前端：Web 控制台（§8）                      [P2]
+│   └── src/
+│       ├── pages/                     home / runs / run-detail / compare / baselines / experiments
+│       │                              trends / catalog / evidence                 [P3]
+│       ├── components/                VerdictBadge、ThresholdTable、FlowStepTable、DeltaCell、GrafanaPanel
+│       ├── api/                       唯一的数据访问层：页面只通过它访问后端
+│       └── models/                    Run Record 类型（与 schemas/ 保持一致）
+│
+├── server/                            只读 API（§8.5）                            [P2]
+│   ├── routes/                        runs / compare / baselines / trends / experiments（只有 GET）
+│   └── store/                         Run Store 适配：files；postgres（未决，§3.9）
 │
 ├── ci/                                CI 流水线定义（平台 Phase 2 决定）          [P2]
 │   ├── pr-smoke                       PR 冒烟门禁
@@ -683,7 +715,8 @@ AI-Performance-Engineering/
 │   └── <runId>/
 │       ├── run-record.json            项目 Run Record（含 Verdict）
 │       ├── k6-summary.json            k6 原始 summary（排查用）
-│       ├── report.md                  人读报告
+│       ├── report.md                  人读报告（终端、CI）
+│       ├── report.html                静态报告页（单文件，浏览器直接打开）
 │       ├── dashboard.html             k6 web-dashboard 导出
 │       └── k6.log
 │
@@ -702,9 +735,8 @@ AI-Performance-Engineering/
 └── infra/                             外部依赖的配置（不自建平台）
     ├── quickpizza/compose.yaml        目标系统                                   [P1]
     └── observability/                 Prometheus / Grafana / Tempo 配置           [P2–3]
-        └── dashboards/                统一查看入口（§3.9），JSON 纳入 git          [P2]
-            ├── run-overview.json      一次运行的全部信息（变量 testid）
-            └── runs.json              所有运行列表
+        └── dashboards/                Grafana 仪表盘 JSON，纳入 git               [P2]
+            └── run-overview.json      一次运行的时序面板（变量 testid），嵌入 Web 控制台
 ```
 
 ### 5.3 目录设计说明
@@ -720,6 +752,8 @@ AI-Performance-Engineering/
 | 没有 `lib/`、`utils/`、`common/` | 通用代码只有 Core 一个归宿，避免无边界的公共目录 |
 | `results/` 不入 git，`baselines/` 入 git | 运行结果是临时产物；基线是被显式钉住的决策 |
 | `infra/` 只放配置 | 项目不拥有平台（§6） |
+| `web/`、`server/` 独立于 `perf/`、`tools/` | 展示侧有自己的 npm 依赖和构建步骤，不能污染"无构建"的执行侧；展示侧整体删除后，执行、判定、CI 不受影响 |
+| `schemas/` 单独成目录 | Run Record 是执行侧和展示侧之间唯一的契约，带 `schemaVersion`；结构变更先改 schema |
 
 ### 5.4 一个测试如何组装（示意）
 
@@ -767,21 +801,22 @@ node tools/run.mjs --system quickpizza --test shop --profile average --env local
 
 ### 5.6 Phase 1 实际创建的最小集合
 
-`perf/core/`（6–7 个文件）、`perf/profiles/`（smoke / average / stress + index）、`perf/systems/quickpizza/`（env、2–3 个 Service、1–2 个 Flow、data、metrics、slo、1 个 test）、`tools/run.mjs`、`tools/report.mjs`、`infra/quickpizza/`、`journal/pain-points.md`、`.gitignore`。
+`perf/core/`（6–7 个文件）、`perf/profiles/`（smoke / average / stress + index）、`perf/systems/quickpizza/`（env、2–3 个 Service、1–2 个 Flow、data、metrics、slo、1 个 test）、`tools/run.mjs`、`tools/report.mjs`、`schemas/run-record.schema.json`、`infra/quickpizza/`、`journal/pain-points.md`、`.gitignore`。
 
 **其他目录在对应阶段需要时再创建**。
 
 ---
 
-## 6. 边界：Core / Extension / Infrastructure / AI
+## 6. 边界：Core / Extension / Infrastructure / Web / AI
 
-依赖方向：**Extension → Core**，**AI → Core（只读）**。Core 绝不依赖 Extension 或 AI。
+依赖方向：**Extension → Core**，**Web → Run Record（只读）**，**AI → Core（只读）**。Core 绝不依赖 Extension、Web 或 AI。
 
 | 区域 | 负责 | 不负责 / 约束 |
 |---|---|---|
 | **Core** | Composer（Flow 与 Profile 分离）、显式模型、SLO → 阈值、有效性规则、数据规则、tag 词汇表、Run 入口 / Run Record / Verdict、基线对比 | 协议抽象层、包装 k6 API、存储、UI、插件系统、任何 AI 调用 |
 | **Extension** | 协议扩展（xk6-sql/redis/kafka/tcp）、输出配置、Trace 注入、Otava、k6-operator 适配 | 准入：有真实需求；k6 核心不满足；按"核心模块 → 官方扩展 → 活跃社区扩展 → 自建"选择；可移除；版本锁定；拒绝已归档扩展 |
 | **Infrastructure** | 项目只拥有配置与约定 | 不拥有平台部署、目标系统部署、CI 平台 |
+| **Web**（前端 + 只读 API） | 展示运行、结论、对比、趋势、实验；嵌入或链接 Grafana 面板 | **不计算判定和回归；不写 Run Record；不触发压测（§8.8 的条件满足前）；不编辑 SLO / Profile / 基线；可整体移除** |
 | **AI** | 只读消费 Run Record / Evidence Bundle，输出带证据引用的建议或受约束产物 | **不决定 Verdict；不在 k6 运行路径中；不发起压测；不读原始时序；敏感数据不出域；可整体移除** |
 
 **Code Review 检查清单**：
@@ -794,6 +829,8 @@ node tools/run.mjs --system quickpizza --test shop --profile average --env local
 - [ ] Core import 了 `k6/x/*` 或 `k6/experimental/*`？
 - [ ] 新增的抽象与当前 Test 无关？
 - [ ] AI 代码写入 Verdict、调用 k6、或读取原始样本？
+- [ ] 前端或 API 计算判定 / 回归、写入 Run Record、或调用 k6？
+- [ ] 前端页面绕过 `web/src/api/` 直接读文件或数据库？
 
 ---
 
@@ -846,7 +883,207 @@ Core 唯一需要知道的协议信息是"延迟/错误指标叫什么"，用一
 
 ---
 
-## 8. AI 的位置与当前决策
+## 8. 前端规划
+
+> 状态：规划，尚未实现。决策记录见 `decisions/ADR-004-frontend.md`。
+
+### 8.1 定位与原则
+
+前端是**查看运行、结论、对比、趋势和实验的统一入口**（§3.9）。它解决的问题是：压测结果散落在终端、Markdown 文件、Grafana 和 CI 日志里，除了跑压测的人，其他人很难看懂"这次到底怎么样"。
+
+| 原则 | 含义 |
+|---|---|
+| **只读优先** | Phase 1–3 的前端不触发压测、不修改任何配置 |
+| **不计算判定** | 判定、回归结论只来自 Run Record；前端只展示 |
+| **不重复 Grafana** | 时序曲线嵌入或链接 Grafana 面板，不自己重画监控大盘 |
+| **定义在 git** | SLO、Profile、Flow、基线的修改走代码和 PR；前端只展示它们 |
+| **每个数字可追溯** | 页面上的每个结果都带 runId，并能打开原始 Run Record |
+| **`invalid` ≠ `failed`** | 两者必须在视觉上明确区分；`invalid` 时 SLO 结果置灰并标注"不作为结论" |
+| **可整体移除** | 前端和 API 停掉，不影响执行、判定和 CI |
+
+### 8.2 分阶段
+
+| 阶段 | 对应 Phase | 形态 | 内容 | 需要的基础设施 |
+|---|---|---|---|---|
+| **F0 静态报告** | Phase 1 | `results/<runId>/report.html`，单文件、自包含 | 一次运行的判定、阈值结果、Flow/Step 指标、有效性检查、附件链接 | 无：`tools/report.mjs` 直接生成，浏览器打开 |
+| **F1 Web 控制台** | Phase 2 | 单页应用 + 只读 API | 首页、运行列表、运行详情、对比、基线、实验 | 一个 Web 服务（静态文件 + API）；Grafana 用于嵌入时序面板 |
+| **F2 分析视图** | Phase 3 | 在 F1 上增加页面 | 趋势与变点、证据视图（Evidence Bundle）、调用链跳转、测试目录 | Tempo、Evidence Bundle |
+| **F3 操作能力** | 条件触发（§8.8） | 在 F1 上增加写操作 | 从页面发起压测、登录与权限 | 登录系统、CI 触发接口、护栏 |
+| **F4 AI 建议面板** | Phase 5，仅当评估通过 | 运行详情中的一个区块 | AI 给出的候选假设，每条带证据链接，明确标注为"建议" | Phase 4 评估通过的能力 |
+
+F0 和 F1 的内容同源：都从 Run Record 生成，F0 是 F1 运行详情页的离线版本。
+
+### 8.3 用户与使用场景
+
+| 用户 | 要回答的问题 | 主要页面 |
+|---|---|---|
+| 性能工程师 | 这次跑得怎么样？哪个阈值失败？和基线比差多少？ | 运行详情、对比 |
+| 开发人员 | 我的改动有没有引起回归？ | 运行详情（从 CI 通知的链接进入）、趋势 |
+| 负责人 | 各系统当前的性能状态如何？夜间回归是否正常？ | 首页 |
+| 环境 / 运维 | 这次测试有效吗？负载机和环境是否正常？ | 运行详情的有效性区块 |
+
+### 8.4 页面规划
+
+| 页面 | 路由 | 内容 | 数据来源 | 阶段 |
+|---|---|---|---|---|
+| 首页 | `/` | 每个 system × test × env 最近一次的判定；最近的 Nightly 状态；最近出现的回归；最近的运行 | Run Store | F1 |
+| 运行列表 | `/runs` | 按 system / test / profile / env / 判定 / 时间筛选；列：时间、test、profile、判定、关键 p95、错误率、与基线的差值 | Run Store | F1 |
+| 运行详情 | `/runs/:runId` | 见下方示意。运行中的测试显示状态和嵌入的实时面板 | Run Record + Grafana | F1 |
+| 对比 | `/compare?a=&b=` | 两次运行按 Flow/Step 并排显示数值和差值 | Run Record | F1 |
+| 基线 | `/baselines` | 每个 test × env 当前的基线、钉住的时间和对应 runId、历史变更 | `baselines/` | F1 |
+| 实验 | `/experiments`、`/experiments/:id` | 实验记录列表与正文，引用的运行可以点击跳转 | `experiments/` | F1 |
+| 趋势 | `/trends/:system/:test/:env` | 关键指标随运行的变化，标出基线和变点 | Run Store + 变点检测结果 | F2 |
+| 证据 | `/runs/:runId/evidence` | Evidence Bundle：各服务 RED 差值、资源 Top-N、慢调用链摘要、错误分组 | Evidence Bundle | F2 |
+| 测试目录 | `/catalog` | 有哪些被测系统、测试、Flow、Profile、SLO（从仓库定义导出，只读） | 仓库导出的 JSON | F2 |
+
+对比页说明：任意两次运行并排显示差值只是展示。"是否回归"的结论只来自 `tools/compare.mjs` 写入的对比结果，前端不自己判断。
+
+#### 运行详情页示意
+
+```text
+┌───────────────────────────────────────────────────────────────────────────┐
+│ shop · average · local              20260930T101500Z-a1b2c3     [ FAILED ] │
+│ k6 v2.3.0 · git a1b2c3d · 10:15–10:42 · 目标 50 flows/s                     │
+├───────────────────────────────────────────────────────────────────────────┤
+│ 有效性   ✔ 实际到达率 49.8 / 50    ✔ dropped_iterations 0    ✔ 负载机 CPU 41% │
+├───────────────────────────────────────────────────────────────────────────┤
+│ SLO 阈值                              结果       目标       与基线           │
+│ ✘ checkout / create_order   p95      342 ms    < 300 ms    +18%            │
+│ ✔ checkout / pay            p95      410 ms    < 500 ms    +2%             │
+│ ✔ checkout   order_success           99.6%     > 99%       0               │
+├───────────────────────────────────────────────────────────────────────────┤
+│ Flow / Step 明细：p50 / p95 / p99 / 错误率 / 吞吐                            │
+├───────────────────────────────────────────────────────────────────────────┤
+│ 时序曲线：嵌入 Grafana 面板，testid 和时间窗已对齐        [在 Grafana 中打开] │
+├───────────────────────────────────────────────────────────────────────────┤
+│ 附件：report.md · run-record.json · dashboard.html · k6.log                │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+（数值仅为版式示意。）
+
+页面从上到下的顺序固定：**先结论，再有效性，再阈值，再明细，最后曲线**。有效性不通过时，判定显示为 `INVALID`，下面的 SLO 阈值整体置灰。
+
+### 8.5 前端架构
+
+```mermaid
+flowchart LR
+    subgraph EXEC["执行侧（已有设计）"]
+        RUN[tools/run.mjs<br/>report.mjs / compare.mjs]
+    end
+    subgraph DATA["数据"]
+        RS[(Run Store<br/>Run Record / 历史)]
+        GIT[(git 仓库<br/>baselines / experiments)]
+        PROM[(Prometheus)]
+    end
+    subgraph SRV["server/（只读 API）"]
+        API[GET 接口]
+        ST[store 适配<br/>files / postgres]
+    end
+    subgraph WEB["web/（单页应用）"]
+        PAGES[pages]
+        APIC[api 数据访问层]
+    end
+    GRAF[Grafana]
+    RUN -->|写入| RS
+    RS --> ST --> API
+    GIT --> API
+    API --> APIC --> PAGES
+    PROM --> GRAF
+    GRAF -->|iframe 嵌入 / 链接<br/>带 testid + 时间窗| PAGES
+```
+
+| 要点 | 说明 |
+|---|---|
+| 前端只和 API 通信 | 页面通过 `web/src/api/` 这一层访问后端，不直接读文件或数据库。存储从文件换成数据库时，前端不用改 |
+| API 只读 | 只有 GET 接口；不调用 k6，不写 Run Record，不计算判定 |
+| 时序数据不经过 API | 曲线由 Grafana 面板直接展示。API 不代理 Prometheus 查询 |
+| 契约 | `schemas/run-record.schema.json` 是执行侧与展示侧之间唯一的契约，带 `schemaVersion` |
+| 运行中的测试 | `run.mjs` 在启动时先写入一条状态为 `running` 的 Run Record，控制台据此显示正在运行的测试 |
+| Grafana 嵌入 | 通过 iframe 嵌入面板，需要 Grafana 允许嵌入并解决访问认证；**Phase 2 开始时验证**，不可行就退回"带参数的链接" |
+
+#### 只读 API
+
+| 接口 | 返回 | 阶段 |
+|---|---|---|
+| `GET /api/runs?system=&test=&profile=&env=&verdict=&from=&to=` | 运行摘要列表（分页） | F1 |
+| `GET /api/runs/:runId` | 完整 Run Record（含对比结果，如果有） | F1 |
+| `GET /api/runs/:runId/artifacts/:name` | 附件：report.md、dashboard.html、k6.log | F1 |
+| `GET /api/overview` | 每个 system × test × env 最近一次的判定与状态 | F1 |
+| `GET /api/baselines` | 当前基线列表 | F1 |
+| `GET /api/experiments`、`GET /api/experiments/:id` | 实验记录 | F1 |
+| `GET /api/trends?system=&test=&env=&metric=` | 指标随运行的序列，带基线和变点标记 | F2 |
+| `GET /api/runs/:runId/evidence` | Evidence Bundle | F2 |
+| `GET /api/catalog` | 系统、测试、Flow、Profile、SLO 定义 | F2 |
+
+### 8.6 技术选型
+
+推荐方案，Phase 2 开始时复核后定稿。
+
+| 项 | 推荐 | 理由 | 备选 |
+|---|---|---|---|
+| F0 静态报告 | `tools/report.mjs` 用模板字符串生成单文件 HTML，内联 CSS 和 SVG | 无依赖、无构建，可作为 CI 制品直接打开 | — |
+| 框架 | React + TypeScript + Vite，单页应用 | 生态成熟；TypeScript 能对照 Run Record 契约做类型检查 | Vue 3 + Vite |
+| 组件库 | Ant Design | 表格、筛选、描述列表等数据型页面的组件齐全 | 自己写少量组件 |
+| 图表 | ECharts，只用于趋势、对比、分布 | 跨运行的图表 Grafana 不擅长；实时时序不自己画 | — |
+| API | Node.js，只读 REST | 与 `tools/` 同语言，可复用读取 Run Record 的逻辑 | — |
+| 部署 | 静态文件和 API 打成一个容器，内网访问 | 只读、无敏感操作，Phase 2 不做登录 | — |
+| 测试 | 组件测试 + 少量端到端测试（运行列表 → 运行详情） | 保证判定状态的显示不出错 | — |
+
+npm 依赖和构建步骤**只存在于 `web/` 和 `server/`**。`perf/` 和 `tools/` 仍然遵守"无构建、仅标准库"（ADR-003）。
+
+### 8.7 目录结构
+
+```text
+schemas/
+└── run-record.schema.json     Run Record 契约                                [P1]
+web/                                                                          [P2]
+└── src/
+    ├── pages/                 home / runs / run-detail / compare / baselines / experiments
+    │                          trends / catalog / evidence                    [P3]
+    ├── components/            VerdictBadge、ThresholdTable、FlowStepTable、DeltaCell、GrafanaPanel
+    ├── api/                   唯一的数据访问层
+    └── models/                Run Record 类型
+server/                                                                       [P2]
+├── routes/                    只有 GET
+└── store/                     Run Store 适配：files；postgres（未决）
+```
+
+### 8.8 前端不做什么
+
+| 不做 | 原因 | 什么条件下再做 |
+|---|---|---|
+| 从页面发起、停止压测 | 爆炸半径：误对生产或错误目标加压 | 见下方 F3 条件 |
+| 在线编辑 SLO / Profile / Flow / 基线 | 这些是代码和决策，应该走 git 和 PR 审核 | 不做；基线更新可以提供"生成 PR"的入口（F3） |
+| 计算判定或回归 | 会出现两个互相矛盾的"事实" | 永不 |
+| 重画时序监控大盘 | Grafana 已经做得很好 | 不做 |
+| 在线脚本编辑器、录制 | k6 Studio 已提供 | 不做 |
+| 登录、用户、权限 | 只读控制台部署在内网，没有敏感操作 | F3，或多团队共享时 |
+| AI 聊天框 | AI 能力要先通过 Phase 4 评估，且形态是"带证据的建议"，不是聊天 | Phase 5 |
+
+**F3（从页面发起压测）的引入条件**：非工程师需要自助发起压测，或 CLI / CI 触发已经成为明显的效率瓶颈。
+
+**F3 必须具备的护栏**：
+
+- 登录和权限，操作留下审计记录；
+- 只能选择已有的 test / profile / env，强度有上限；
+- 目标白名单和并发锁（与 `run.mjs` 的预检一致）；
+- 生产环境需要二次确认；
+- 页面**不自建执行器**：只是调用 CI 的触发接口，由 CI 运行 `run.mjs`。执行路径始终只有一条。
+
+### 8.9 验收标准
+
+| 阶段 | 验收 |
+|---|---|
+| F0 | 每次运行生成 `report.html`，不联网、不起服务就能打开；内容与 report.md 一致；`invalid` 与 `failed` 显示明显不同 |
+| F1 | 从 CI 通知或报告里的链接一次跳转进入运行详情；不打开 Grafana 就能回答"判定是什么、哪个阈值失败、测试是否有效、和基线差多少"；停掉前端和 API 后，`run.mjs` 与 CI 照常工作 |
+| F2 | 能在趋势页看出回归从哪一次运行开始；证据视图能支撑 Phase 3 的人工瓶颈定位 |
+
+**停止条件**：F1 上线后如果实际访问量很低（大家只看 CI 通知和 report.html），不继续做 F2，保留 F0 和 F1 的现状。
+
+---
+
+## 9. AI 的位置与当前决策
 
 ```mermaid
 flowchart LR
@@ -868,13 +1105,16 @@ flowchart LR
 
 ---
 
-## 9. 技术基线
+## 10. 技术基线
 
 | 项 | 决定 |
 |---|---|
 | 执行引擎 | k6 v2.x，锁定 minor，版本写入 Run Record |
-| 测试代码 | JavaScript ES Module，无构建步骤 |
-| k6 外部工具 | Node.js，仅标准库 |
+| 测试代码（`perf/`） | JavaScript ES Module，无构建步骤 |
+| k6 外部工具（`tools/`） | Node.js，仅标准库 |
+| 静态报告（P1） | `tools/report.mjs` 用模板生成单文件 HTML：内联 CSS 和 SVG，不引入框架 |
+| 前端（`web/`，P2） | React + TypeScript + Vite + Ant Design + ECharts（推荐，Phase 2 开始时复核）；npm 和构建步骤只存在于 `web/`、`server/` |
+| 只读 API（`server/`，P2） | Node.js，只有 GET 接口 |
 | 断言 | `check` + 阈值；需要时用 k6 2.0 Assertions（`k6-testing` jslib） |
 | 禁用 | `k6/experimental/*` 不进 Core；不使用已删除 / 已归档功能 |
 | 目标系统 | Phase 1：grafana/quickpizza；Phase 2–3：OpenTelemetry Demo（flagd 故障注入可作为 AI 评估的真实答案） |
@@ -883,14 +1123,14 @@ flowchart LR
 
 ---
 
-## 10. 路线图摘要
+## 11. 路线图摘要
 
 | 阶段 | 目标 | 进入下一阶段的标准 |
 |---|---|---|
 | **0 Research & Architecture** ✅ | 研究、架构、决策 | 已完成 |
-| **1 Minimal Executable Core** | QuickPizza 上执行 1–2 个 TOC Flow；3 种 Profile；Composer；预检；web-dashboard 监控；Run Record + Verdict + report.md | 同一 Flow 三种 Profile 零修改运行；VU 不足 → `invalid`；SLO 收紧 → `failed`；每次运行生成报告 |
-| **2 Real Workflow & Baseline** | Flow Mix、数据生命周期、Baseline/Compare、Experiment Record、Prometheus/Grafana、CI（PR 冒烟门禁 + Nightly 回归 + 通知） | 能检出人为引入的回归且不误报；PR 冒烟可阻止合并；至少一个完整实验闭环 |
-| **3 Observability & Evidence** | Trace/系统指标关联、Evidence Bundle、规则化定位基线、标注故障数据集（≥ 30 样本） | 基线命中率已测得 |
+| **1 Minimal Executable Core** | QuickPizza 上执行 1–2 个 TOC Flow；3 种 Profile；Composer；预检；web-dashboard 监控；Run Record + Verdict + report.md / report.html | 同一 Flow 三种 Profile 零修改运行；VU 不足 → `invalid`；SLO 收紧 → `failed`；每次运行生成报告 |
+| **2 Real Workflow & Baseline** | Flow Mix、数据生命周期、Baseline/Compare、Experiment Record、Prometheus/Grafana、CI（PR 冒烟门禁 + Nightly 回归 + 通知）、Web 控制台（只读） | 能检出人为引入的回归且不误报；PR 冒烟可阻止合并；至少一个完整实验闭环 |
+| **3 Observability & Evidence** | Trace/系统指标关联、Evidence Bundle、规则化定位基线、标注故障数据集（≥ 30 样本）；控制台增加趋势、证据视图、测试目录 | 基线命中率已测得 |
 | **4 AI Evaluation** | 离线对比 AI 与规则基线 | Go / No-Go（Go 条件：Top-3 命中率 ≥ 基线 + 15pp、证据引用 100%、幻觉 ≤ 5%、诊断时间 −30%、结果稳定） |
 | **5 Valuable AI** | 只实现评估通过的能力并持续度量 | 连续两个周期不达标则下线 |
 
@@ -898,7 +1138,7 @@ flowchart LR
 
 ---
 
-## 11. 当前明确不做
+## 12. 当前明确不做
 
 | 不做 | 为什么 | 什么条件下再做 |
 |---|---|---|
@@ -906,7 +1146,9 @@ flowchart LR
 | 自建自然语言写脚本、录制、关联 | 现成工具已提供 | 不自建 |
 | AI 判定 Pass/Fail、AI 发起压测 | 不可复现、爆炸半径 | 永不 / 需要基础设施级限制 |
 | 统一协议接口、插件系统 | k6 模块即协议抽象 | ≥ 3 协议且大量重复 |
-| Web UI / 服务端 / 数据库 | 无需求 | 多团队共享与权限需求 |
+| 从页面触发压测、在线编辑 SLO / Profile / 基线、登录与权限 | 只读控制台已满足查看需求；页面触发有爆炸半径；定义和基线应走 git 与 PR | 非工程师需要自助发起压测，且 §8.8 的护栏就绪 |
+| 在线脚本编辑器、录制、自建监控大盘 | k6 Studio、Grafana 已提供 | 不自建 |
+| 数据库 | 存储形态未决（§3.9） | 确认后从 Phase 2 引入 PostgreSQL |
 | 分布式执行 | Phase 1–3 单机足够 | 单机负载不足或多区域 |
 | 自建 Observability 平台、自研回归算法 | Prometheus/Grafana、Otava 已成熟 | 不自建 |
 | Flow 的 YAML DSL、TypeScript / 构建工具链 | 需要代码表达力；避免工具链 | 非开发人员大量编写 / 需要类型检查 |
@@ -914,7 +1156,7 @@ flowchart LR
 
 ---
 
-## 12. 文档分层
+## 13. 文档分层
 
 ```text
 docs/
@@ -922,7 +1164,8 @@ docs/
 ├── decisions/                         L2 决策：为什么这样设计
 │   ├── ADR-001-architecture-direction.md   Architecture First，而不是 AI First
 │   ├── ADR-002-core-model-separation.md    Flow ⟂ Load Profile，Verdict 区分 invalid
-│   └── ADR-003-technical-baseline.md       k6 v2、无构建步骤、目标系统
+│   ├── ADR-003-technical-baseline.md       k6 v2、无构建步骤、目标系统
+│   └── ADR-004-frontend.md                 前端：静态报告 + 只读 Web 控制台，分阶段
 ├── plans/                             L2 计划：接下来做什么
 │   ├── roadmap.md                          各阶段范围、验收标准、停止条件
 │   └── ai-opportunity-map.md               14 个 AI 候选的逐项评估与 Go/No-Go 条件
