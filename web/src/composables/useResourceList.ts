@@ -1,0 +1,40 @@
+import { onMounted, ref, type Ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import type { ResourceApi } from '../api'
+import { confirmAction, showError } from '../utils/feedback'
+
+/** 定义类页面共用的「加载列表 + 确认后删除」。 */
+export function useResourceList<T extends { id: number; name: string }, TInput>(
+  api: ResourceApi<T, TInput>,
+  label: string,
+) {
+  const items = ref([]) as Ref<T[]>
+  const loading = ref(false)
+
+  async function load(): Promise<void> {
+    loading.value = true
+    try {
+      items.value = await api.list()
+    } catch (e) {
+      showError(e, `加载${label}失败`)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function remove(row: T): Promise<void> {
+    const ok = await confirmAction(`确定删除${label}「${row.name}」吗？`, `删除${label}`, true)
+    if (!ok) return
+    try {
+      await api.remove(row.id)
+      ElMessage.success('已删除')
+      await load()
+    } catch (e) {
+      showError(e, '删除失败')
+    }
+  }
+
+  onMounted(load)
+
+  return { items, loading, load, remove }
+}

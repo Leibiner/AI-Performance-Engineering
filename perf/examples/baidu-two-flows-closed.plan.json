@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "runId": "example-baidu-two-flows-closed",
+  "test": { "id": 2, "name": "百度首页 + 搜索建议" },
+  "env": {
+    "id": 1, "name": "百度（仅冒烟）", "baseUrl": "https://www.baidu.com",
+    "headers": { "User-Agent": "Mozilla/5.0 k6-mvp", "Accept-Encoding": "gzip" }
+  },
+  "profile": {
+    "id": 3, "name": "固定并发（2 个并发，8 秒）", "type": "smoke", "model": "closed",
+    "config": { "vus": 2, "durationSec": 8 }
+  },
+  "flows": [
+    {
+      "key": "f1", "name": "访问首页", "weight": 0.5,
+      "steps": [
+        {
+          "key": "f1s1", "name": "百度首页", "method": "GET", "path": "/",
+          "headers": {}, "body": null,
+          "expectStatus": 200, "expectBodyContains": "百度",
+          "extracts": [],
+          "thinkTimeMs": 1500
+        }
+      ]
+    },
+    {
+      "key": "f2", "name": "搜索建议（两步，带变量传递）", "weight": 0.5,
+      "steps": [
+        {
+          "key": "f2s1", "name": "搜索建议 k6", "method": "GET", "path": "/sugrec?prod=pc&wd=k6",
+          "headers": {}, "body": null,
+          "expectStatus": 200, "expectBodyContains": "\"q\":\"k6\"",
+          "extracts": [
+            { "var": "word", "from": "json", "expr": "q" },
+            { "var": "firstSa", "from": "json", "expr": "g.0.sa" },
+            { "var": "ctype", "from": "header", "expr": "content-type" }
+          ],
+          "thinkTimeMs": 500
+        },
+        {
+          "key": "f2s2", "name": "搜索建议（用上一步的词）", "method": "GET", "path": "/sugrec?prod=pc&wd={{word}}0",
+          "headers": { "X-Prev-Sa": "{{firstSa}}" }, "body": null,
+          "expectStatus": 200, "expectBodyContains": "\"q\":\"k60\"",
+          "extracts": [
+            { "var": "echo", "from": "regex", "expr": "\"q\":\"([^\"]+)\"" }
+          ],
+          "thinkTimeMs": 1500
+        }
+      ]
+    }
+  ],
+  "slo": { "p95Ms": 2000, "p99Ms": null, "errorRate": 0.01, "checksRate": 0.99 }
+}

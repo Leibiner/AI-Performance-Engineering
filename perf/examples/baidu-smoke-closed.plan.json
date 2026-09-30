@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "runId": "example-baidu-smoke-closed",
+  "test": { "id": 1, "name": "百度首页冒烟" },
+  "env": {
+    "id": 1, "name": "百度（仅冒烟）", "baseUrl": "https://www.baidu.com",
+    "headers": { "User-Agent": "Mozilla/5.0 k6-mvp", "Accept-Encoding": "gzip" }
+  },
+  "profile": {
+    "id": 1, "name": "冒烟", "type": "smoke", "model": "closed",
+    "config": { "vus": 1, "iterations": 10, "maxDurationSec": 30 }
+  },
+  "flows": [
+    {
+      "key": "f1", "name": "访问首页", "weight": 1,
+      "steps": [
+        {
+          "key": "f1s1", "name": "百度首页", "method": "GET", "path": "/",
+          "headers": {}, "body": null,
+          "expectStatus": 200, "expectBodyContains": "百度",
+          "extracts": [],
+          "thinkTimeMs": 500
+        }
+      ]
+    }
+  ],
+  "slo": { "p95Ms": 2000, "p99Ms": null, "errorRate": 0.01, "checksRate": 0.99 }
+}

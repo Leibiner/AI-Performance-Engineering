@@ -1,0 +1,251 @@
+"""定义类资源（环境、接口、业务流程、负载配置、测试）的统一增删改查（契约 §3.1）。"""
+
+import sqlite3
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from fastapi import APIRouter, Body
+
+from . import db, validators
+from .errors import conflict, not_found
+
+
+@dataclass(frozen=True)
+class Field:
+    name: str  # JSON 里的字段名（camelCase）
+    column: str  # 表里的列名
+    json: bool = False  # 是否以 JSON 文本存储
+
+
+@dataclass(frozen=True)
+class Resource:
+    name: str  # 路径和表名
+    label: str  # 中文名，用在提示里
+    fields: tuple[Field, ...]
+    validate: Callable[[Any, sqlite3.Connection], dict]
+    decorate: Callable[[list[dict], sqlite3.Connection], None] | None = None  # GET 时附加只读字段
+    guard_delete: Callable[[int, sqlite3.Connection], None] | None = None  # 被引用时抛 409
+
+
+# ---------- 读写 ----------
+
+def _to_obj(res: Resource, row: sqlite3.Row) -> dict:
+    obj: dict[str, Any] = {"id": row["id"]}
+    for f in res.fields:
+        value = row[f.column]
+        obj[f.name] = db.loads(value) if f.json else value
+    obj["createdAt"] = row["created_at"]
+    obj["updatedAt"] = row["updated_at"]
+    return obj
+
+
+def _encode(res: Resource, data: dict) -> list:
+    return [db.dumps(data[f.name]) if f.json else data[f.name] for f in res.fields]
+
+
+def list_objs(conn: sqlite3.Connection, res: Resource) -> list[dict]:
+    rows = conn.execute(f"SELECT * FROM {res.name} ORDER BY id").fetchall()
+    return [_to_obj(res, r) for r in rows]
+
+
+def get_obj(conn: sqlite3.Connection, res: Resource, item_id: Any) -> dict | None:
+    """按 id 取一条（不带只读的展示字段）；不存在返回 None。"""
+    if not validators.is_int(item_id):
+        return None
+    row = conn.execute(f"SELECT * FROM {res.name} WHERE id = ?", (item_id,)).fetchone()
+    return _to_obj(res, row) if row else None
+
+
+def insert(conn: sqlite3.Connection, res: Resource, data: dict) -> int:
+    now = db.now_iso()
+    columns = [f.column for f in res.fields] + ["created_at", "updated_at"]
+    marks = ", ".join("?" for _ in columns)
+    cur = conn.execute(
+        f"INSERT INTO {res.name} ({', '.join(columns)}) VALUES ({marks})",
+        _encode(res, data) + [now, now],
+    )
+    return int(cur.lastrowid)
+
+
+def _update(conn: sqlite3.Connection, res: Resource, item_id: int, data: dict) -> None:
+    sets = ", ".join(f"{f.column} = ?" for f in res.fields)
+    conn.execute(
+        f"UPDATE {res.name} SET {sets}, updated_at = ? WHERE id = ?",
+        _encode(res, data) + [db.now_iso(), item_id],
+    )
+
+
+def _require(conn: sqlite3.Connection, res: Resource, item_id: int) -> dict:
+    obj = get_obj(conn, res, item_id)
+    if obj is None:
+        raise not_found(f"{res.label} #{item_id} 不存在")
+    return obj
+
+
+def _decorated(conn: sqlite3.Connection, res: Resource, objs: list[dict]) -> list[dict]:
+    if res.decorate:
+        res.decorate(objs, conn)
+    return objs
+
+
+# ---------- 各资源特有的逻辑 ----------
+
+def _decorate_flows(flows: list[dict], conn: sqlite3.Connection) -> None:
+    apis = {r["id"]: r for r in conn.execute("SELECT id, name, method, path FROM apis")}
+    for flow in flows:
+        for step in flow["steps"]:
+            api = apis.get(step["apiId"])
+            step["apiName"] = api["name"] if api else None
+            step["method"] = api["method"] if api else None
+            step["path"] = api["path"] if api else None
+
+
+def _decorate_tests(tests: list[dict], conn: sqlite3.Connection) -> None:
+    names = {r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM flows")}
+    for test in tests:
+        for item in test["flows"]:
+            item["flowName"] = names.get(item["flowId"])
+        row = conn.execute(
+            "SELECT run_id, verdict, started_at FROM runs WHERE test_id = ? "
+            "ORDER BY started_at DESC, run_id DESC LIMIT 1",
+            (test["id"],),
+        ).fetchone()
+        test["lastRun"] = (
+            {"runId": row["run_id"], "verdict": row["verdict"], "startedAt": row["started_at"]} if row else None
+        )
+
+
+def _guard_api_delete(api_id: int, conn: sqlite3.Connection) -> None:
+    used = [
+        f"业务流程“{flow['name']}”（#{flow['id']}）"
+        for flow in list_objs(conn, FLOWS)
+        if any(step.get("apiId") == api_id for step in flow["steps"])
+    ]
+    if used:
+        raise conflict("该接口正被业务流程引用，不能删除。请先从这些流程中移除它", used)
+
+
+def _guard_flow_delete(flow_id: int, conn: sqlite3.Connection) -> None:
+    used = [
+        f"测试“{test['name']}”（#{test['id']}）"
+        for test in list_objs(conn, TESTS)
+        if any(item.get("flowId") == flow_id for item in test["flows"])
+    ]
+    if used:
+        raise conflict("该业务流程正被测试引用，不能删除。请先从这些测试中移除它", used)
+
+
+ENVIRONMENTS = Resource(
+    name="environments",
+    label="环境",
+    fields=(
+        Field("name", "name"),
+        Field("baseUrl", "base_url"),
+        Field("headers", "headers", json=True),
+        Field("maxVus", "max_vus"),
+        Field("maxRate", "max_rate"),
+        Field("maxDurationSec", "max_duration_sec"),
+        Field("note", "note"),
+    ),
+    validate=validators.validate_environment,
+)
+
+APIS = Resource(
+    name="apis",
+    label="接口",
+    fields=(
+        Field("name", "name"),
+        Field("method", "method"),
+        Field("path", "path"),
+        Field("headers", "headers", json=True),
+        Field("body", "body"),
+        Field("expectStatus", "expect_status"),
+        Field("expectBodyContains", "expect_body_contains"),
+        Field("extracts", "extracts", json=True),
+        Field("note", "note"),
+    ),
+    validate=validators.validate_api,
+    guard_delete=_guard_api_delete,
+)
+
+FLOWS = Resource(
+    name="flows",
+    label="业务流程",
+    fields=(Field("name", "name"), Field("note", "note"), Field("steps", "steps", json=True)),
+    validate=validators.validate_flow,
+    decorate=_decorate_flows,
+    guard_delete=_guard_flow_delete,
+)
+
+PROFILES = Resource(
+    name="profiles",
+    label="负载配置",
+    fields=(
+        Field("name", "name"),
+        Field("type", "type"),
+        Field("model", "model"),
+        Field("config", "config", json=True),
+        Field("note", "note"),
+    ),
+    validate=validators.validate_profile,
+)
+
+TESTS = Resource(
+    name="tests",
+    label="测试",
+    fields=(
+        Field("name", "name"),
+        Field("note", "note"),
+        Field("flows", "flows", json=True),
+        Field("slo", "slo", json=True),
+    ),
+    validate=validators.validate_test,
+    decorate=_decorate_tests,
+)
+
+RESOURCES = (ENVIRONMENTS, APIS, FLOWS, PROFILES, TESTS)
+
+
+# ---------- 路由 ----------
+
+def _build_router(res: Resource) -> APIRouter:
+    router = APIRouter(prefix=f"/api/{res.name}", tags=[res.label])
+
+    @router.get("", summary=f"{res.label}列表")
+    def list_items():
+        with db.connect() as conn:
+            return _decorated(conn, res, list_objs(conn, res))
+
+    @router.post("", status_code=201, summary=f"新建{res.label}")
+    def create_item(payload: Any = Body(...)):
+        with db.connect() as conn:
+            data = res.validate(payload, conn)
+            item_id = insert(conn, res, data)
+            return _decorated(conn, res, [_require(conn, res, item_id)])[0]
+
+    @router.get("/{item_id}", summary=f"{res.label}详情")
+    def get_item(item_id: int):
+        with db.connect() as conn:
+            return _decorated(conn, res, [_require(conn, res, item_id)])[0]
+
+    @router.put("/{item_id}", summary=f"整体替换{res.label}")
+    def replace_item(item_id: int, payload: Any = Body(...)):
+        with db.connect() as conn:
+            _require(conn, res, item_id)
+            data = res.validate(payload, conn)
+            _update(conn, res, item_id, data)
+            return _decorated(conn, res, [_require(conn, res, item_id)])[0]
+
+    @router.delete("/{item_id}", summary=f"删除{res.label}")
+    def delete_item(item_id: int):
+        with db.connect() as conn:
+            _require(conn, res, item_id)
+            if res.guard_delete:
+                res.guard_delete(item_id, conn)
+            conn.execute(f"DELETE FROM {res.name} WHERE id = ?", (item_id,))
+        return {"ok": True}
+
+    return router
+
+
+routers = [_build_router(res) for res in RESOURCES]

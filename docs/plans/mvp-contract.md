@@ -28,7 +28,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 |---|---|
 | 服务地址 | `0.0.0.0:8088`（环境变量 `PORT`、`HOST` 可改） |
 | 启动命令 | `uv run uvicorn server.main:app --host 0.0.0.0 --port 8088`（在仓库根目录执行） |
-| k6 实时仪表盘 | `0.0.0.0:5665`（运行期间才有） |
+| k6 实时仪表盘 | `127.0.0.1:5665`，**只监听本机、不对外开放**（原因见 §4）。开启它只是为了在结束时导出 `dashboard.html` |
 | 数据库 | `data/app.db`（`DATA_DIR` 可改），不入 git |
 | 运行产物 | `results/<runId>/`（`RESULTS_DIR` 可改），不入 git |
 | k6 可执行文件 | `.tools/bin/k6`（`K6_BIN` 可改） |
@@ -178,7 +178,9 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   "summary": null,
   "snapshot": { "...": "发起时的 plan（见 §4），保证以后改定义不影响历史" },
   "record": null,
-  "artifacts": ["plan.json"]
+  "stopRequested": false,
+  "progress": "running (05.0s), 1/1 VUs, 7 complete and 0 interrupted iterations",
+  "artifacts": ["plan.json", "k6.log"]
 }
 ```
 
@@ -187,20 +189,29 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 - `summary`（结束后，供列表显示）：`{ "reqs": 10, "rps": 1.2, "p95": 182.4, "errorRate": 0, "checksRate": 1 }`
 - `record`：最终的 Run Record（§5）
 - `archived`：存档标记。所有运行都会自动保存；"存档"表示长期保留，已存档的运行不能删除
+- `stopRequested`：用户已请求停止但 k6 还没退出时为 `true`
+- `progress`：运行中为 k6 日志里最新的一行进度文本（刚启动时可能为 `null`）；结束后为 `null`。前端靠轮询这个字段显示进度
+- `artifacts`：当前实际存在的产物文件名。`dashboard.html` 是可选的，运行太短或被中止时可能没有
+
+返回约定：定义类资源的 POST 返回 201 和对象，PUT 返回 200 和对象，DELETE 返回 200 和 `{"ok": true}`。运行的 stop、PATCH 返回完整运行对象，DELETE 返回 `{"ok": true}`。产物地址加 `?download=1` 时作为附件下载。
 
 **预检**（`POST /api/runs` 时执行，不通过返回 422）：
 
 1. 测试、负载配置、环境都存在；测试至少有 1 个流程，每个流程至少有 1 个步骤
 2. 环境的 `baseUrl` 是合法的 http / https 地址
 3. 负载配置不超过环境上限：并发（`vus` 或 `preAllocatedVus`）≤ `maxVus`；到达率（`rate`、`startRate`、各 stage 的 `target`）≤ `maxRate`；总时长 ≤ `maxDurationSec`
-4. 没有其他运行正在进行（否则 409）
-5. k6 可执行文件存在
+4. 负载配置属于 §3.1 的四种形态之一
+5. 流程数量不超过并发：closed 模型下 `vus`（以及固定迭代数形态的 `iterations`）不小于测试的流程数量；open 模型下 `preAllocatedVus` 不小于流程数量（每个流程至少要有 1 个 VU）
+6. 没有其他运行正在进行（否则 409）
+7. k6 可执行文件存在
+
+测试、负载配置或环境不存在也算预检不通过，返回 422。
 
 ### 3.3 其他
 
 | 方法与路径 | 返回 |
 |---|---|
-| `GET /api/system` | `{ "k6Version": "v2.3.0", "pythonVersion": "3.12.2", "dashboardPort": 5665, "runningRunId": null }` |
+| `GET /api/system` | `{ "k6Version": "v2.3.0", "pythonVersion": "3.12.2", "dashboardPort": 5665, "runningRunId": null }`（`dashboardPort` 仅供排查，前端不使用） |
 | `GET /api/overview` | `{ "counts": { "environments": 1, "apis": 1, "flows": 1, "profiles": 3, "tests": 1, "runs": 12 }, "verdicts": { "passed": 8, "failed": 2, "invalid": 1, "error": 0, "aborted": 1 }, "recentRuns": [运行列表项 × 最近 10 条], "runningRunId": null }` |
 
 ## 4. plan.json（后端 → k6）
@@ -238,8 +249,8 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 ### 启动 k6 的方式（后端负责）
 
 ```bash
-K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_HOST=0.0.0.0 K6_WEB_DASHBOARD_PORT=5665 \
-K6_WEB_DASHBOARD_EXPORT=<输出目录>/dashboard.html \
+K6_WEB_DASHBOARD=true K6_WEB_DASHBOARD_HOST=127.0.0.1 K6_WEB_DASHBOARD_PORT=5665 \
+K6_WEB_DASHBOARD_EXPORT=<输出目录>/dashboard.html K6_WEB_DASHBOARD_PERIOD=1s \
 k6 run perf/runner.js \
   -e PLAN_FILE=<输出目录>/plan.json \
   -e OUTPUT_DIR=<输出目录> \
@@ -249,7 +260,9 @@ k6 run perf/runner.js \
 - 工作目录是仓库根目录；`PLAN_FILE`、`OUTPUT_DIR` 用绝对路径
 - 标准输出和标准错误写入 `<输出目录>/k6.log`
 - `testid` tag 只在这里设置一次
-- 仪表盘相关环境变量的确切名称以 k6 v2.3.0 实际行为为准，由执行引擎一方验证后更新本节
+- **实时仪表盘不能给浏览器用**：联调实测，只要有浏览器连着 `:5665`，k6 跑完后就不会退出（它等页面关闭），也不写 `run-record.json`，运行会一直停在"运行中"。所以仪表盘只监听 `127.0.0.1`，页面上不嵌入也不链接它；运行中的进度由运行对象的 `progress` 字段提供，结束后的图表用导出的 `dashboard.html`
+- 仪表盘的环境变量名已在 k6 v2.3.0 实测有效。运行期间监听 `*:5665`，页面在 `/ui/`（访问 `/` 会跳转过去）；k6 退出后端口随之关闭
+- `K6_WEB_DASHBOARD_PERIOD`（聚合周期）默认 10s。不设置时，几秒到十几秒的短运行会因为数据点不够而**跳过 HTML 导出**（日志里有一条 warning，退出码不受影响）；设为 `1s` 后，3 秒的运行也能导出。即便如此，`dashboard.html` 仍应当作可选产物处理（运行太短或启动失败时不存在）
 
 ## 5. 运行产物（k6 → 后端）
 
@@ -288,6 +301,9 @@ k6 run perf/runner.js \
   - `slo`：系统是否达标（来自 `plan.slo`）
   - `validity`：本次测试是否可信（`checks` 通过率；open 模型下的 `dropped_iterations`）
   - 只为了让 k6 在 summary 里输出分步骤指标而加的占位阈值**不出现在这个数组里**
+- `plan.slo.checksRate` 为 `null` 时，仍然附加 `checks` 的 validity 阈值，下限取默认值 0.99
+- 没有样本时用 `null` 而不是 0：某个步骤一次请求都没发出（例如前一步的检查没通过，本次迭代提前结束）时，该步骤的 `count` 为 0，`avg / p50 / p95 / p99 / max / errorRate` 为 `null`；整个运行没有发出任何请求时，`overall` 里的时间类字段和 `errorRate`、`checksRate` 同样为 `null`
+- `steps[].count` 是这一步发出的 HTTP 请求数；被自动跟随的重定向每一跳各算一次
 - `k6Verdict`：只根据阈值得出。任一 `validity` 不通过 → `invalid`；否则任一 `slo` 不通过 → `failed`；否则 `passed`
 
 ### 后端补全为最终 Run Record
@@ -315,6 +331,8 @@ k6 退出后，后端读取 `run-record.json`，补上以下字段，回写文�
 | `k6Verdict` 为 `invalid` | `invalid` |
 | `k6Verdict` 为 `failed`，或退出码为 110 | `failed` |
 | 其他 | `passed` |
+
+最终 Run Record 还带一个 `verdictReason`：一句中文，说明判定的原因（如"全部阈值通过""SLO 阈值未通过""用户请求停止"）。没有 `run-record.json` 时后端写一份骨架（`thresholds: []`、`metrics: null`），保证 `record` 总是存在。
 
 ## 6. 对第三方目标的硬性约束
 
