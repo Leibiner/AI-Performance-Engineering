@@ -21,7 +21,7 @@ from typing import Any
 from fastapi import APIRouter, Body
 from fastapi.responses import Response
 
-from . import config, db
+from . import config, db, executors
 from .errors import ApiError, bad_request, conflict, not_found
 from .resources import APIS, ENVIRONMENTS, FLOWS, PROFILES, TESTS, get_obj
 from .system import VERDICTS, fingerprint, running_run_id
@@ -45,7 +45,8 @@ EXIT_OK = (0, 99, 110)  # 正常结束 / 阈值未通过 / 脚本调用 exec.tes
 EXIT_ABORTED = (105, 108)  # 外部中断 / 脚本调用 test.abort()
 
 _LIST_COLUMNS = (
-    "run_id, test_id, test_name, profile_id, profile_name, env_id, env_name, status, verdict, "
+    "run_id, test_id, test_name, profile_id, profile_name, env_id, env_name, env_type, "
+    "executor_id, executor_name, status, verdict, "
     "started_at, ended_at, exit_code, note, archived, stop_requested, summary"
 )
 
@@ -100,7 +101,8 @@ def _to_obj(row, *, full: bool) -> dict:
         "runId": row["run_id"],
         "testId": row["test_id"], "testName": row["test_name"],
         "profileId": row["profile_id"], "profileName": row["profile_name"],
-        "envId": row["env_id"], "envName": row["env_name"],
+        "envId": row["env_id"], "envName": row["env_name"], "envType": row["env_type"],
+        "executorId": row["executor_id"], "executorName": row["executor_name"],
         "status": row["status"],
         "verdict": row["verdict"],
         "startedAt": row["started_at"], "endedAt": row["ended_at"],
@@ -142,34 +144,40 @@ def _fmt(value: Any) -> str:
 
 
 def _limit_problems(profile: dict, env: dict) -> list[str]:
+    """负载配置与被测环境的安全上限比较。上限为 null 表示不限制，跳过那一项。"""
     problems = []
     usage = profile_usage(profile)
-    where = f"环境“{env['name']}”的上限"
-    if usage["concurrency"]:
+    where = f"被测环境“{env['name']}”的安全上限"
+    if env["maxVus"] is not None and usage["concurrency"]:
         field, value = usage["concurrency"]
         if not is_num(value) or value > env["maxVus"]:
             problems.append(f"并发 {_fmt(value)}（{field}）超过{where} maxVus = {_fmt(env['maxVus'])}")
-    for field, value in usage["rates"]:
-        if not is_num(value) or value > env["maxRate"]:
-            problems.append(f"到达率每秒 {_fmt(value)} 次（{field}）超过{where} maxRate = {_fmt(env['maxRate'])}")
-    duration = usage["durationSec"]
-    if not is_num(duration) or duration > env["maxDurationSec"]:
-        problems.append(f"总时长 {_fmt(duration)} 秒超过{where} maxDurationSec = {_fmt(env['maxDurationSec'])}")
+    if env["maxRate"] is not None:
+        for field, value in usage["rates"]:
+            if not is_num(value) or value > env["maxRate"]:
+                problems.append(f"到达率每秒 {_fmt(value)} 次（{field}）超过{where} maxRate = {_fmt(env['maxRate'])}")
+    if env["maxDurationSec"] is not None:
+        duration = usage["durationSec"]
+        if not is_num(duration) or duration > env["maxDurationSec"]:
+            problems.append(f"总时长 {_fmt(duration)} 秒超过{where} maxDurationSec = {_fmt(env['maxDurationSec'])}")
     return problems
 
 
-def _preflight(conn, test_id: int, profile_id: int, env_id: int):
-    """预检第 1–3 项。通过时返回 (test, profile, env, 展开的流程)，否则抛 422。"""
+def _preflight(conn, test_id: int, profile_id: int, env_id: int, executor_id: int | None, confirm_prod: bool):
+    """预检里不涉及“是否已有运行”和 k6 的部分。通过时返回 (test, profile, env, 执行机, 展开的流程)，否则抛 422。"""
     details: list[str] = []
     test = get_obj(conn, TESTS, test_id)
     profile = get_obj(conn, PROFILES, profile_id)
     env = get_obj(conn, ENVIRONMENTS, env_id)
+    executor = executors.find(conn, executor_id)  # executor_id 为 None 时取本机执行机
     if test is None:
         details.append(f"测试 #{test_id} 不存在")
     if profile is None:
         details.append(f"负载配置 #{profile_id} 不存在")
     if env is None:
-        details.append(f"环境 #{env_id} 不存在")
+        details.append(f"被测环境 #{env_id} 不存在")
+    if executor is None:
+        details.append("没有可用的执行机" if executor_id is None else f"执行机 #{executor_id} 不存在")
 
     expanded = []
     if test is not None:
@@ -194,7 +202,11 @@ def _preflight(conn, test_id: int, profile_id: int, env_id: int):
     if env is not None:
         problem = base_url_problem(env["baseUrl"])
         if problem:
-            details.append(f"环境“{env['name']}”的 {problem}")
+            details.append(f"被测环境“{env['name']}”的 {problem}")
+        if env["type"] == "prod" and not confirm_prod:
+            details.append(
+                f"被测环境“{env['name']}”是生产环境，生产环境需要二次确认：请确认后在请求里带上 \"confirmProd\": true 再发起"
+            )
     if profile is not None:
         shape_problem = config_shape_problem(profile["model"], profile["config"])
         if shape_problem:
@@ -216,7 +228,7 @@ def _preflight(conn, test_id: int, profile_id: int, env_id: int):
 
     if details:
         raise ApiError(422, "PREFLIGHT_REJECTED", "预检不通过，运行没有发起", details)
-    return test, profile, env, expanded
+    return test, profile, env, executor, expanded
 
 
 def _build_plan(run_id: str, test: dict, profile: dict, env: dict, expanded: list) -> dict:
@@ -248,7 +260,10 @@ def _build_plan(run_id: str, test: dict, profile: dict, env: dict, expanded: lis
         "schemaVersion": 1,
         "runId": run_id,
         "test": {"id": test["id"], "name": test["name"]},
-        "env": {"id": env["id"], "name": env["name"], "baseUrl": env["baseUrl"].rstrip("/"), "headers": env["headers"]},
+        "env": {
+            "id": env["id"], "name": env["name"], "type": env["type"],
+            "baseUrl": env["baseUrl"].rstrip("/"), "headers": env["headers"],
+        },
         "profile": {
             "id": profile["id"], "name": profile["name"], "type": profile["type"],
             "model": profile["model"], "config": profile["config"],
@@ -350,7 +365,14 @@ def _summary_of(record: dict) -> dict | None:
     return {key: overall.get(key) for key in ("reqs", "rps", "p95", "errorRate", "checksRate")}
 
 
-def _finalize(run_id: str, exit_code: int | None, *, forced: tuple[str, str] | None = None, reason: str | None = None) -> None:
+def _finalize(
+    run_id: str,
+    exit_code: int | None,
+    *,
+    forced: tuple[str, str] | None = None,
+    reason: str | None = None,
+    samples: dict | None = None,
+) -> None:
     """k6 退出后：读 run-record.json，补全为最终 Run Record，回写文件并更新库。"""
     with db.connect() as conn:
         row = conn.execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
@@ -376,7 +398,12 @@ def _finalize(run_id: str, exit_code: int | None, *, forced: tuple[str, str] | N
         "fingerprint": fingerprint(),
         "test": {"id": plan_test.get("id"), "name": plan_test.get("name")},
         "profile": {"id": plan_profile.get("id"), "name": plan_profile.get("name"), "model": plan_profile.get("model")},
-        "env": {"id": plan_env.get("id"), "name": plan_env.get("name"), "baseUrl": plan_env.get("baseUrl")},
+        "env": {
+            "id": plan_env.get("id"), "name": plan_env.get("name"),
+            "type": plan_env.get("type") or row["env_type"], "baseUrl": plan_env.get("baseUrl"),
+        },
+        # 执行机在运行期间的资源占用：只作信息展示，不参与判定
+        "executor": executors.record_block(row["executor_id"], row["executor_name"], samples),
     })
     folder = run_dir(run_id)
     if folder.is_dir():
@@ -397,9 +424,24 @@ def _finalize(run_id: str, exit_code: int | None, *, forced: tuple[str, str] | N
 def _wait(active: _Active) -> None:
     """后台线程：等 k6 退出，然后收尾。无论如何都要把库里的状态改成 finished。"""
     global _active
-    exit_code = active.proc.wait()
+    # 采样器的生命周期完全包在这个线程里：这里启动，k6 一退出就停。
+    # 它只提供附带信息，启动失败、停不下来、取不到结果都不能耽误收尾
+    sampler = None
     try:
-        _finalize(active.run_id, exit_code, reason=active.reason)
+        sampler = executors.Sampler()
+        sampler.start()
+    except Exception:  # noqa: BLE001
+        log.exception("运行 %s：启动执行机采样失败（不影响运行）", active.run_id)
+    exit_code = active.proc.wait()
+    samples = None
+    try:
+        if sampler is not None:
+            sampler.stop()
+            samples = sampler.result()
+    except Exception:  # noqa: BLE001
+        log.exception("运行 %s：读取执行机采样结果失败（不影响收尾）", active.run_id)
+    try:
+        _finalize(active.run_id, exit_code, reason=active.reason, samples=samples)
     except Exception:  # noqa: BLE001
         log.exception("运行 %s 收尾失败", active.run_id)
         try:
@@ -502,12 +544,20 @@ def create_run(payload: Any = Body(...)):
         note = ""
     if not isinstance(note, str):
         problems.append("note（备注）必须是字符串")
+    executor_id = payload.get("executorId")  # 可省略，默认本机执行机
+    if executor_id is not None and not is_int(executor_id):
+        problems.append("executorId 必须是整数；省略时使用本机执行机")
+    confirm_prod = payload.get("confirmProd")
+    if confirm_prod is not None and not isinstance(confirm_prod, bool):
+        problems.append("confirmProd 必须是 true 或 false")
     if problems:
         raise bad_request("字段校验失败", problems)
 
     with _start_lock:
         with db.connect() as conn:
-            test, profile, env, expanded = _preflight(conn, payload["testId"], payload["profileId"], payload["envId"])
+            test, profile, env, executor, expanded = _preflight(
+                conn, payload["testId"], payload["profileId"], payload["envId"], executor_id, confirm_prod is True
+            )
             running = running_run_id(conn)
         if running:
             raise conflict(f"已有运行在进行中（{running}），同一时间只允许 1 个运行。请等它结束或先停止它")
@@ -528,10 +578,11 @@ def create_run(payload: Any = Body(...)):
 
         with db.connect() as conn:
             conn.execute(
-                "INSERT INTO runs (run_id, test_id, test_name, profile_id, profile_name, env_id, env_name, "
-                "status, started_at, note, snapshot) VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)",
-                (run_id, test["id"], test["name"], profile["id"], profile["name"], env["id"], env["name"],
-                 started_at, note, db.dumps(plan)),
+                "INSERT INTO runs (run_id, test_id, test_name, profile_id, profile_name, env_id, env_name, env_type, "
+                "executor_id, executor_name, status, started_at, note, snapshot) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)",
+                (run_id, test["id"], test["name"], profile["id"], profile["name"], env["id"], env["name"], env["type"],
+                 executor["id"], executor["name"], started_at, note, db.dumps(plan)),
             )
 
         try:

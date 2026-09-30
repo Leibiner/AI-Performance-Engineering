@@ -1,10 +1,15 @@
-import { ref } from 'vue'
+import { h, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ApiError, runsApi, systemApi, type RunStartInput } from '../api'
+import { ApiError, runsApi, systemApi, type Environment, type RunStartInput } from '../api'
 import { showError } from '../utils/feedback'
 
+/** 发起前需要知道的被测环境信息：类型为生产时要二次确认 */
+export type StartEnv = Pick<Environment, 'name' | 'baseUrl' | 'type'>
+
 interface StartOptions {
+  /** 这次运行的被测环境。类型为 prod 时先弹二次确认，确认后请求里带 confirmProd: true */
+  env?: StartEnv | null
   /** 预检被拒绝（422）时的处理；不传则用对话框逐条显示 details */
   onPreflightRejected?: (error: ApiError) => void
 }
@@ -13,6 +18,35 @@ interface StartOptions {
 export function useStartRun() {
   const router = useRouter()
   const starting = ref(false)
+
+  async function confirmProd(env: StartEnv): Promise<boolean> {
+    try {
+      await ElMessageBox.confirm(
+        h('div', { class: 'prod-confirm' }, [
+          h('p', { class: 'prod-confirm-lead' }, '你正在对生产环境发起压测'),
+          h('dl', [
+            h('dt', '被测环境'),
+            h('dd', env.name),
+            h('dt', '地址'),
+            h('dd', { class: 'mono' }, env.baseUrl),
+          ]),
+          h('p', '请求会真实地发往这个地址。请确认已获得许可，并且负载配置在安全上限以内。'),
+        ]),
+        '确认对生产环境压测',
+        {
+          type: 'warning',
+          confirmButtonText: '确认，对生产环境发起压测',
+          cancelButtonText: '取消',
+          confirmButtonClass: 'el-button--danger',
+          // 不自动聚焦到确认按钮，避免一按回车就确认
+          autofocus: false,
+        },
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
 
   async function handleConflict(error: ApiError): Promise<void> {
     let runningRunId: string | null = null
@@ -38,9 +72,17 @@ export function useStartRun() {
   }
 
   async function start(input: RunStartInput, options: StartOptions = {}): Promise<boolean> {
+    const payload: RunStartInput = { ...input }
+    // 非生产不带 confirmProd
+    delete payload.confirmProd
+    if (options.env?.type === 'prod') {
+      if (!(await confirmProd(options.env))) return false
+      payload.confirmProd = true
+    }
+
     starting.value = true
     try {
-      const run = await runsApi.start(input)
+      const run = await runsApi.start(payload)
       ElMessage.success('运行已发起')
       await router.push(`/runs/${run.runId}`)
       return true

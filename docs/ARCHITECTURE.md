@@ -14,9 +14,10 @@
 |---|---|---|
 | 研究结论（k6、性能工程、Observability、AI + 性能测试） | ✅ 已完成 | `research/` |
 | 架构、边界、决策、路线图 | ✅ 已完成 | 本文、ADR-001–005、`plans/` |
-| 在页面上维护定义：环境、接口、业务流程、负载配置、测试（含验收标准） | ✅ 已实现（MVP） | 增删改查，存 SQLite（§8.2） |
+| 在页面上维护定义：被测环境（含类型 dev / test / staging / prod）、接口、业务流程、负载配置、测试（含验收标准） | ✅ 已实现（MVP） | 增删改查，存 SQLite（§8.2） |
+| 执行机（运行 k6 的机器）：查看主机、系统、资源、k6 / Python / uv 版本、项目目录、当前状态 | ✅ 已实现（MVP） | 只有运行后端的这一台；只能改名称和备注（§3.5） |
 | 从页面发起、停止运行 | ✅ 已实现（MVP） | 同一时间只允许 1 个运行（§3.5） |
-| 预检：定义完整、地址合法、负载形态合法、不超过环境流量上限、k6 可用 | ✅ 已实现（MVP） | 目标健康检查、k6 版本核对未实现 |
+| 预检：定义完整、地址合法、负载形态合法、不超过被测环境的安全上限、生产环境二次确认、k6 可用 | ✅ 已实现（MVP） | 目标健康检查、k6 版本核对未实现 |
 | 数据驱动的业务流程执行（HTTP；多步骤、变量提取、检查、等待时间） | ✅ 已实现（MVP） | 通用脚本 `perf/runner.js` 解释执行；没有分支和循环（§1.2） |
 | 同一个测试用不同负载配置运行；显式 open / closed；4 种形态 | ✅ 已实现（MVP） | 对百度只跑过冒烟级别 |
 | 多个业务流程按权重混合（Flow Mix） | ✅ 已实现（MVP） | 每个流程编译成一个 k6 scenario |
@@ -30,7 +31,8 @@
 | 按流程 / 步骤设置 SLO；业务指标（业务成功率） | ❌ 未实现 | Phase 1 剩余 |
 | 负载的"形状与强度分离" | ❌ 未实现 | 负载配置里直接写绝对数值（§1.2） |
 | 测试数据：数据集、账户池、唯一键、每 VU token 缓存 | ❌ 未实现 | Phase 1 剩余（§4.3） |
-| 负载机采样（CPU / 内存）、目标健康检查、失控自动中止 | ❌ 未实现 | §3.5、§3.6 |
+| 执行机采样：运行期间每秒采样本机 CPU 和内存，写进 Run Record | ✅ 已实现（MVP） | 只展示，**不参与判定**（§3.6）；是否据此判 `invalid` 未决 |
+| 目标健康检查、失控自动中止 | ❌ 未实现 | §3.5、§3.6 |
 | 登录与权限、操作审计、多个运行同时进行 | ❌ 未实现 | ADR-005 的复议条件 |
 | 自有的、可以自由加压的目标系统 | ❌ 未具备 | 未决；现在的目标是百度，只能冒烟 |
 | 基线与回归比较、重复运行汇总、实验记录 | ❌ 规划，未实现 | Phase 2 |
@@ -43,7 +45,7 @@
 
 **运行前提**：已安装 uv。`scripts/setup.sh` 用 uv 同步 Python 依赖，并把 k6 v2.3.0 和构建前端用的 Node v24.21.0 下载到 `.tools/`，不需要 sudo 和 Docker。`scripts/start.sh` 后台启动服务，浏览器访问 `http://<服务器地址>:8088`。
 
-**压测目标的限制**：MVP 的目标是 `https://www.baidu.com`，属于第三方线上站点，**只允许冒烟级别流量**。种子环境"百度（仅冒烟）"的硬性上限是 2 并发、每秒 2 次、60 秒，由后端预检强制执行，不得调高（§3.5）。所以目前的运行只验证了"链路能跑通、判定能算对"，**不产生任何性能结论**。
+**压测目标的限制**：MVP 的目标是 `https://www.baidu.com`，属于第三方线上站点，**只允许冒烟级别流量**。种子环境"百度（仅冒烟）"的类型是生产（`prod`），安全上限是 2 并发、每秒 2 次、60 秒，由后端预检强制执行，不得调高（§3.5）。所以目前的运行只验证了"链路能跑通、判定能算对"，**不产生任何性能结论**。
 
 ### 1.2 MVP 相对原设计的简化与改变
 
@@ -65,18 +67,6 @@ Phase 0 的设计是"手写 JS 的 Flow 模块 + 命令行入口 + 只读控制�
 | 测试策略 | 组件测试 + 少量端到端测试 | **不写单元测试套件**，靠真实运行验证 | 判定逻辑没有自动化的回归保护 |
 
 **保留下来的核心设计**（与定义存在哪里无关）：业务（接口、流程）与负载（负载配置）分开维护，只在发起运行时组装；负载模型显式区分 open / closed；SLO 是数据，阈值由它生成，并自动附加有效性阈值；判定为 `passed / failed / invalid / error / aborted`，`invalid` 优先于 `failed`，由确定性规则计算；每次运行有 runId、完整记录和发起时的配置快照；AI 的全部约束不变。
-
-### 1.3 契约已经修订、实现尚未完成的部分
-
-写作本节时（2026-09-30），`plans/mvp-contract.md` 比已提交的代码新：它已经加入了下面几项，对应的实现正在进行，还没有提交。**本文其余章节描述的是提交 `c37c57a`（MVP 第 1、2 批）的代码，不包含这几项。** 它们实现并验证之后，要同步修改右栏列出的章节，并删除本节。
-
-| 契约里新增的内容 | 提交 `c37c57a` 里的情况 | 实现后要同步的章节 |
-|---|---|---|
-| **执行机**（Load Generator，实际运行 k6 的机器）：`executors` 表、`/api/executors`（只有本机一台，只能改名称和备注）、运行对象里的 `executorId` / `executorName` | 没有这张表和接口，没有对应的页面 | §3.1、§4.1、§5.2、§8.2、§8.4 |
-| **被测环境的类型** `type`：`dev / test / staging / prod` | 环境没有类型字段 | §4.1、§8.2 |
-| **安全上限可以为空**：`prod` 环境三项上限都必填；其他类型可以是 `null`，表示不限制 | 三项上限对所有环境都必填 | §3.5、§8.5 |
-| **生产环境二次确认**：被测环境类型为 `prod` 时，`POST /api/runs` 必须带 `confirmProd: true` | 没有 | §3.5、§8.5 |
-| **执行机采样**：运行期间每秒采样本机 CPU 和内存，写进 Run Record 的 `executor`；只展示，不参与判定 | 没有采样 | §1.1、§3.6、§4.6 |
 
 ---
 
@@ -120,12 +110,13 @@ flowchart TB
     BROWSER["浏览器<br/>管理控制台 web/（Vue 3 单页应用）"]
 
     subgraph SERVER["server/（Python + FastAPI，单进程）"]
-        CRUD["定义的增删改查 + 校验<br/>环境 / 接口 / 业务流程 / 负载配置 / 测试"]
+        CRUD["定义的增删改查 + 校验<br/>被测环境 / 接口 / 业务流程 / 负载配置 / 测试"]
+        EXEC["执行机信息 + 运行期间的资源采样<br/>（目前只有本机）"]
         ORCH["运行编排<br/>预检 → 组装 plan → 启动 / 停止 k6<br/>→ 最终判定 → 补全 Run Record"]
         STATIC["托管前端构建产物 web/dist"]
     end
 
-    DB[("data/app.db<br/>SQLite：5 类定义 + 运行")]
+    DB[("data/app.db<br/>SQLite：5 类定义 + 执行机 + 运行")]
 
     subgraph PERF["perf/（k6 运行时，无 npm、无构建）"]
         RUNNER["runner.js<br/>唯一的 k6 入口"]
@@ -135,7 +126,7 @@ flowchart TB
     end
 
     K6["k6 v2.3.0 子进程<br/>Scenario → Executor → VU → Iteration"]
-    SUT[("被测系统<br/>环境的 baseUrl")]
+    SUT[("被测系统<br/>被测环境的 baseUrl")]
     RES[("results/runId/<br/>plan.json / run-record.json /<br/>k6-summary.json / dashboard.html / k6.log")]
 
     subgraph PLANNED["规划，未实现"]
@@ -146,6 +137,8 @@ flowchart TB
 
     BROWSER -->|REST /api| CRUD
     BROWSER -->|REST /api| ORCH
+    BROWSER -->|REST /api| EXEC
+    ORCH --> EXEC
     STATIC --> BROWSER
     CRUD --> DB
     ORCH --> DB
@@ -161,7 +154,7 @@ flowchart TB
     DB -.只读.-> AIX
 ```
 
-实线 = 已实现；虚线 = 规划。三部分（`perf/`、`server/`、`web/`）之间的接口约定在 `plans/mvp-contract.md`，字段级细节以它为准，本文不重复。
+实线 = 已实现；虚线 = 规划。图里有两种"环境"，不要混淆：**执行机**是安装了本项目、实际运行 k6 的机器（现在就是 `server/` 和 k6 所在的这台）；**被测环境**是被压测的目标（地址、类型、安全上限）。三部分（`perf/`、`server/`、`web/`）之间的接口约定在 `plans/mvp-contract.md`，字段级细节以它为准，本文不重复。
 
 ### 3.2 运行环节总览
 
@@ -169,7 +162,7 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    T["① 触发<br/>页面：测试 → 运行"] --> P["② 预检<br/>定义完整 / 形态合法<br/>环境流量上限<br/>没有其他运行"]
+    T["① 触发<br/>页面：测试 → 运行"] --> P["② 预检<br/>定义完整 / 形态合法<br/>被测环境安全上限<br/>生产环境二次确认<br/>没有其他运行"]
     P --> E["③ 执行<br/>k6 子进程<br/>runner.js 读 plan"]
     E --> M["④ 监控<br/>日志里的进度<br/>手动停止"]
     M --> C["⑤ 汇总<br/>handleSummary<br/>run-record.json"]
@@ -181,9 +174,9 @@ flowchart LR
 | 环节 | MVP 实际做法 | 由谁完成 | 规划（未实现） |
 |---|---|---|---|
 | ① 触发 | 在"测试"页点"运行"，选负载配置和环境；或在运行详情页点"再次运行" | `web/` → `POST /api/runs` | CI、定时触发（§3.8，入口待重新设计） |
-| ② 预检 | 定义存在且完整、地址合法、负载形态合法、不超过环境上限、流程数不超过并发、没有其他运行、k6 可执行 | `server/runs.py` | 目标健康检查、k6 版本核对、生产环境二次确认 |
+| ② 预检 | 定义存在且完整、地址合法、负载形态合法、不超过被测环境的安全上限、生产环境二次确认、流程数不超过并发、没有其他运行、k6 可执行 | `server/runs.py` | 目标健康检查、k6 版本核对 |
 | ③ 执行 | 后端启动 k6 子进程，传入 `plan.json` 和输出目录，`--tag testid=<runId>` | k6 + `perf/runner.js` | 专用负载机、CI runner、k6-operator |
-| ④ 监控 | 后端从 `k6.log` 取最新一行进度，前端每 2 秒轮询；可手动停止 | `server/runs.py`、运行详情页 | Prometheus + Grafana、负载机采样、失控自动中止、Trace |
+| ④ 监控 | 后端从 `k6.log` 取最新一行进度，前端每 2 秒轮询；可手动停止 | `server/runs.py`、`server/executors.py`（执行机采样）、运行详情页 | Prometheus + Grafana、失控自动中止、Trace |
 | ⑤ 汇总 | `handleSummary` 写 `run-record.json` 和 `k6-summary.json` | `perf/core/summary.js` | 重复运行汇总、多实例合并 |
 | ⑥ 判定 | k6 侧按阈值类别得出 `k6Verdict`；后端结合退出码和停止请求得出最终 `verdict` | `perf/core/summary.js` + `server/runs.py` | 基线对比、变点检测 |
 | ⑦ 查看 | 运行详情页；k6 导出的 `dashboard.html` | `web/` | CI Summary、通知、趋势、证据视图 |
@@ -236,11 +229,22 @@ sequenceDiagram
 
 ### 3.5 执行
 
+#### 执行机与被测环境
+
+"环境"在这个项目里有两个不同的意思，页面和接口上分成两个概念：
+
+| 概念 | 是什么 | 在哪里维护 | 内容 |
+|---|---|---|---|
+| **执行机**（Load Generator，即"负载机"） | 安装了本项目、实际运行 k6 的机器 | "执行机"页。只有运行后端的这一台，由后端建库时自动创建，只能改名称和备注 | 主机名、IP、系统、CPU 核数、内存、负载、磁盘、k6 / Python / uv 版本、项目目录、当前是否在运行 —— 每次请求时实时采集 |
+| **被测环境**（Environment） | 被压测的目标系统的一套部署 | "被测环境"页，增删改查 | 名称、类型（`dev` 开发 / `test` 测试 / `staging` 预发 / `prod` 生产）、基础地址、公共请求头、安全上限 |
+
+**被测环境上为什么有并发、到达率、时长**：它们不是负载配置，而是这个环境**最多允许承受多少流量**的安全上限（`maxVus`、`maxRate`、`maxDurationSec`）。负载"打多大"仍然只写在负载配置里；上限只在预检时用来拒绝超限的运行，防止把只适合冒烟的环境（例如第三方站点、生产环境）当成压测环境来打。生产环境三项上限必填；其他类型可以留空，表示不限制。
+
 #### 执行环境
 
-| 环境 | 用途 | 负载机 | 目标系统 | 状态 |
+| 环境 | 用途 | 执行机（负载机） | 目标系统 | 状态 |
 |---|---|---|---|---|
-| 服务所在的机器 | MVP 的唯一环境：维护定义、冒烟 | 后端启动的本机 k6 子进程 | 环境定义里的 `baseUrl`（种子数据是百度） | ✅ 已实现 |
+| 服务所在的机器 | MVP 的唯一环境：维护定义、冒烟 | 本机执行机：后端启动的本机 k6 子进程 | 被测环境定义里的 `baseUrl`（种子数据是百度） | ✅ 已实现 |
 | CI runner | PR 冒烟（功能正确性，**不做性能结论**） | 共享 CI runner | CI 内临时启动的目标系统 | 规划，未实现 |
 | 专用负载机 | 夜间 average-load 与回归比较；手动 stress / spike / soak | 固定规格的独立机器 | 固定、隔离的性能环境 | 规划，未实现 |
 | k6-operator / Grafana Cloud k6 | 单机负载不足时的分布式执行 | K8s Pod × N / 云端 | 性能环境 | 条件触发 |
@@ -251,17 +255,18 @@ sequenceDiagram
 
 | 检查 | 不通过时 |
 |---|---|
-| 测试、负载配置、环境都存在；测试至少有 1 个流程，每个流程至少有 1 个步骤，引用的接口都存在 | 422 `PREFLIGHT_REJECTED` |
-| 环境的 `baseUrl` 是合法的 http / https 地址 | 422 |
+| 测试、负载配置、被测环境、执行机都存在（`executorId` 省略时用本机执行机）；测试至少有 1 个流程，每个流程至少有 1 个步骤，引用的接口都存在 | 422 `PREFLIGHT_REJECTED` |
+| 被测环境的 `baseUrl` 是合法的 http / https 地址 | 422 |
 | 负载配置属于四种形态之一（§4.2） | 422 |
-| **不超过环境上限**：并发（`vus` 或 `preAllocatedVus`）≤ `maxVus`；到达率（`rate`、`startRate`、各 stage 的 `target`）≤ `maxRate`；总时长 ≤ `maxDurationSec` | 422，逐条列出超出的项 |
+| **不超过被测环境的安全上限**（只检查填了的项）：并发（`vus` 或 `preAllocatedVus`）≤ `maxVus`；到达率（`rate`、`startRate`、各 stage 的 `target`）≤ `maxRate`；总时长 ≤ `maxDurationSec` | 422，逐条列出超出的项 |
+| **生产环境二次确认**：被测环境类型为 `prod` 时，请求里必须带 `confirmProd: true`（页面上是一个必须勾选的确认项） | 422 |
 | 流程数量不超过并发：每个流程至少要分到 1 个 VU（固定迭代数形态下还要至少 1 次迭代） | 422 |
 | 没有其他运行正在进行 | 409 `CONFLICT` |
 | k6 可执行文件存在 | 422 |
 
-预检不通过时不生成 runId，不留下运行记录。发起对话框会先在前端对照负载配置和环境上限并给出提示，但是否拒绝只以后端预检为准。
+预检不通过时不生成 runId，不留下运行记录。发起对话框会先在前端对照负载配置和被测环境的安全上限并给出提示，但是否拒绝只以后端预检为准。
 
-**没有实现的检查**：目标健康检查、k6 版本与固定版本是否一致、目标主机白名单（任何合法的 http / https 地址都能建成环境）、生产环境二次确认。
+**没有实现的检查**：目标健康检查、k6 版本与固定版本是否一致、目标主机白名单（任何合法的 http / https 地址都能建成被测环境，而且非生产类型可以不设上限，见 §8.5）。
 
 #### 启动 k6
 
@@ -300,24 +305,25 @@ stateDiagram-v2
 
 | 护栏 | 实现 |
 |---|---|
-| 环境流量上限 | 每个环境必填 `maxVus`、`maxRate`、`maxDurationSec`，预检强制执行 |
+| 被测环境的安全上限 | `maxVus`、`maxRate`、`maxDurationSec`；生产环境三项必填，其他类型可留空（不限制）。预检强制执行 |
+| 生产环境二次确认 | 被测环境类型为 `prod` 时，发起运行必须显式确认（`confirmProd: true`） |
 | 同一时间只允许 1 个运行 | 后端用一把锁串行化"检查 → 写库 → 启动"，以库里的 `status` 为准 |
 | 到时即停 | 每个 scenario 的 `gracefulStop` 收紧为 5 秒（k6 默认 30 秒） |
 | 到达率模型不自动扩容 | `maxVUs` = `preAllocatedVUs`；VU 不够时丢弃迭代，由有效性阈值暴露 |
 | 失败不空转 | 某一步检查没通过时，本次迭代的后续步骤不再执行，但仍然等待 think time，避免失败后循环变快 |
 | 到达率必须是整数 | 小数到达率用 `timeUnit` 换算（每秒 0.5 次 → 每 2 秒 1 次），拆分后的总量不超过设定值 |
 
-**没有的护栏**（风险见 §8.5）：登录与权限；环境上限本身可以在页面上修改；没有运行之间的冷却时间；没有后端的超时看门狗（时长靠 k6 executor 自己的设定）；没有 `abortOnFail` 之类的失控保护；环境和接口的请求头原样存入数据库、`plan.json` 和运行快照，**没有凭据管理，不要在里面放真实密钥**。
+**没有的护栏**（风险见 §8.5）：登录与权限；安全上限和环境类型本身可以在页面上修改；没有目标地址白名单；没有运行之间的冷却时间；没有后端的超时看门狗（时长靠 k6 executor 自己的设定）；没有 `abortOnFail` 之类的失控保护；环境和接口的请求头原样存入数据库、`plan.json` 和运行快照，**没有凭据管理，不要在里面放真实密钥**。
 
 ### 3.6 监控
 
-运行期间应该同时监控三个对象：负载机、负载本身、被测系统。只看被测系统，会把负载机的问题误判为系统问题。MVP 只覆盖了其中一部分：
+运行期间应该同时监控三个对象：执行机（负载机）、负载本身、被测系统。只看被测系统，会把执行机的问题误判为系统问题。MVP 只覆盖了其中一部分：
 
 | 监控对象 | 看什么 | MVP 手段 | 规划（未实现） |
 |---|---|---|---|
 | **负载本身** | 实际到达率、`dropped_iterations`、VU 使用量 | 运行中：k6 进度行（已用时间、VU 数、完成的迭代数）。结束后：总体指标里的 `droppedIterations`、`vusMax`，有效性阈值，`dashboard.html` | Prometheus + k6 官方仪表盘 19665 / 18030 |
 | **业务结果** | 各流程 / 步骤的 p95、错误率 | 结束后：分步骤指标表和柱状图、`dashboard.html` | Grafana，按 flow / step 过滤；SLO 线叠加 |
-| **负载机** | CPU（< 80%）、内存、网络 | **无** | 采样写入 Run Record 作为有效性证据；node_exporter |
+| **执行机（负载机）** | CPU（< 80%）、内存、网络 | 运行期间后端每秒采样本机 CPU 和内存占用，结束时把平均 CPU、最高 CPU、最高内存、样本数写进 Run Record 的 `executor`，运行详情页展示。**只展示，不参与判定** | 超过阈值时判 `invalid`（阈值未决）；网络；node_exporter |
 | **被测系统** | RED（每个服务）、USE（每类资源） | **无** | exporters + Prometheus（Phase 2）；Trace（Phase 3） |
 
 #### k6 实时仪表盘：只监听本机，浏览器不连（联调实测）
@@ -490,7 +496,8 @@ k6 的 `Scenario` = 执行函数 × executor 配置，同时包含"做什么"和
 
 | 页面上的名称 | 表 | 概念 | 内容 | 对应 k6 |
 |---|---|---|---|---|
-| 环境 | `environments` | Environment | 基础地址、公共请求头、流量上限 | 请求的 URL 前缀和公共 header |
+| 执行机 | `executors` | Load Generator（负载机） | 安装了本项目、实际运行 k6 的机器；库里只存名称和备注，其余实时采集 | 运行 `k6 run` 的那台机器 |
+| 被测环境 | `environments` | Environment | 类型（`dev / test / staging / prod`）、基础地址、公共请求头、安全上限 | 请求的 URL 前缀和公共 header |
 | 接口 | `apis` | 一个请求（原设计中 Service 的一个方法） | 方法、路径、请求头、请求体、期望状态码、期望包含的文本、变量提取 | `http.request` + `check` |
 | 业务流程 | `flows` | Flow | 按顺序排列的接口步骤，每步的等待时间 | 一次 iteration |
 | 负载配置 | `profiles` | Load Profile | 类型标签、`model: open / closed`、并发或到达率、时长 | executor 配置 |
@@ -515,8 +522,9 @@ k6 的 `Scenario` = 执行函数 × executor 配置，同时包含"做什么"和
 | **接口** | 一个请求怎么发、期望什么、从响应里提取什么 | 顺序、等待时间、并发、到达率 |
 | **业务流程** | 步骤顺序、每步的 think time | 知道自己以什么负载运行；定义阈值 |
 | **负载配置** | `type`（仅作分类标签）、**显式 `model`**、四种形态之一的参数 | URL、请求体、业务逻辑 |
-| **测试** | 流程权重、SLO | 负载、目标地址（发起运行时才选） |
-| **环境** | 目标地址、公共请求头、流量上限 | 业务逻辑、负载 |
+| **测试** | 流程权重、SLO | 负载、被测环境（发起运行时才选） |
+| **被测环境** | 目标地址、类型、公共请求头、安全上限（这个环境最多允许承受多少流量，只用于预检） | 业务逻辑；负载打多大（那是负载配置的事） |
+| **执行机** | 说明压测从哪台机器发出、它的规格和运行期间的资源占用 | 目标地址、业务逻辑、负载 |
 | **Composer**（`compose.js` + `thresholds.js`） | 纯函数：每个流程生成一个 k6 Scenario；按权重拆分并发、迭代数、到达率；生成 SLO 阈值、有效性阈值和阈值分类 | 业务逻辑 |
 | **解释器**（`interp.js`） | 每步：替换 `{{变量}}` → 发请求 → check → 提取变量 → 等待 | 负载、阈值 |
 | **Result Builder**（`summary.js`） | 按阈值分类得出 `k6Verdict`，整理总体指标和分步骤指标 | 最终判定里与退出码、停止请求有关的部分（后端负责） |
@@ -627,8 +635,9 @@ k6 退出码：0 = 阈值全过；99 = 有阈值未过（未达标和测试无�
 - **快照（snapshot）**：发起时的 plan，内容与 `plan.json` 相同，存在 `runs` 表里。之后修改或删除定义，不影响历史运行；主键不复用，历史运行里的 id 不会指向别的对象。
 - **Run Record**（JSON，`schemaVersion: 1`）：
   - k6 写出：`runId`、`k6Verdict`、按类别标注的阈值结果 `thresholds[]`、`metrics.overall`（请求数、RPS、迭代数、丢弃的迭代数、最大 VU、avg / p50 / p90 / p95 / p99 / max、错误率、检查通过率、收发字节数）、`metrics.steps[]`（每个步骤的请求数、avg / p50 / p95 / p99 / max、错误率）、`testDurationMs`；
-  - 后端补全：`verdict`、`verdictReason`、`exitCode`、时间窗 `window`、环境指纹 `fingerprint`（k6 版本、Python 版本、git sha、主机名）、`test`、`profile`、`env`；
-  - 没有 `run-record.json` 时后端写一份骨架，保证每次运行都有 Run Record。
+  - 后端补全：`verdict`、`verdictReason`、`exitCode`、时间窗 `window`、环境指纹 `fingerprint`（k6 版本、Python 版本、git sha、主机名）、`test`、`profile`、`env`（含 `type`）、`executor`（执行机的主机名、CPU 核数、内存总量，以及运行期间的平均 CPU、最高 CPU、最高内存、样本数；只展示，不参与判定）；
+  - 没有 `run-record.json` 时后端写一份骨架，保证每次运行都有 Run Record；
+  - 加入执行机和环境类型之前的运行，存档不回改：它们的快照和 Run Record 里没有 `env.type` 和 `executor`，只有运行对象上的 `envType`、`executorName` 在迁移时补上了。
 - 它是项目自己的数据结构，是页面展示的唯一依据，也是未来对比、AI 的唯一输入。字段定义见 `plans/mvp-contract.md` §5。
 - **Baseline**（规划，未实现）：显式钉住的某个 `passed` 的运行。
 - **Comparison**（规划，未实现）：按流程 / 步骤比较差值，设实际显著性下限（如 Δp95 ≥ 5% 且 ≥ 20 ms），重复 ≥ 3 次，剔除 warm-up；之后以 Apache Otava 做跨版本变点检测。
@@ -675,7 +684,7 @@ flowchart TB
 | **执行引擎核心** | `perf/core/` | Composer、阈值生成与分类、流程解释器、Run Record 生成和 `k6Verdict` | 只依赖 k6 内置模块 | 认识任何具体的被测系统；`k6/x/*`、`k6/experimental/*`；npm |
 | **k6 入口** | `perf/runner.js` | 读 plan，导出 `options`、`runFlow`、`handleSummary` | `perf/core/` | 业务逻辑、写死的地址或负载 |
 | **后端** | `server/` | 增删改查和校验、预检、组装 plan、启动和停止 k6、最终判定、补全 Run Record、存档、托管前端 | Python 标准库、FastAPI | import `perf/` 的代码（只通过 `plan.json`、命令行参数、`results/` 文件交互）；`--workers` 多进程 |
-| **前端** | `web/` | 8 个页面：维护定义、发起和停止运行、查看结果 | 后端的 REST 接口 | 直接读文件或数据库；计算判定；连 k6 实时仪表盘 |
+| **前端** | `web/` | 9 个页面：维护定义、发起和停止运行、查看结果 | 后端的 REST 接口 | 直接读文件或数据库；计算判定；连 k6 实时仪表盘 |
 | **脚本** | `scripts/` | 环境准备、启动、停止 | uv、`.tools/` | — |
 
 三部分之间**只通过契约关联**（`plans/mvp-contract.md`）：前端 ⇄ 后端是 REST 接口；后端 → k6 是 `plan.json`；k6 → 后端是 `run-record.json` 和退出码。改接口先改契约，再改代码。
@@ -705,9 +714,10 @@ AI-Performance-Engineering/
 ├── server/                       后端（Python 3.12 + FastAPI + sqlite3）
 │   ├── main.py                   应用入口；托管 web/dist；/api 下找不到时返回 JSON 404
 │   ├── config.py                 环境变量：DATA_DIR、RESULTS_DIR、K6_BIN、WEB_DIST、仪表盘端口
-│   ├── db.py                     SQLite 连接、建表（6 张表）
+│   ├── db.py                     SQLite 连接、建表（7 张表）、按 PRAGMA user_version 的版本迁移（迁移前自动备份）
 │   ├── resources.py              5 类定义的统一增删改查、引用保护
-│   ├── validators.py             字段校验、负载配置的四种形态
+│   ├── validators.py             字段校验、负载配置的四种形态、被测环境类型和安全上限
+│   ├── executors.py              执行机：/api/executors、本机信息实时采集、运行期间的 CPU / 内存采样
 │   ├── runs.py                   预检、组装 plan、启动 / 停止 k6、最终判定、Run Record、产物
 │   ├── system.py                 /api/system、/api/overview、环境指纹
 │   ├── seed.py                   种子数据（只在全新的库里写一次）
@@ -717,10 +727,10 @@ AI-Performance-Engineering/
 ├── web/                          前端（Vue 3 + TypeScript + Vite + Element Plus + ECharts）
 │   ├── package.json / package-lock.json / vite.config.ts / tsconfig.json / index.html
 │   └── src/
-│       ├── views/                8 个页面：Overview / Environments / Apis / Flows / Profiles / Tests / Runs / RunDetail
-│       ├── components/           RunDialog、VerdictTag、StatusTag、ThresholdTable、StepLatencyChart、KeyValueEditor、PageHeader
+│       ├── views/                9 个页面：Overview / Executors / Environments / Apis / Flows / Profiles / Tests / Runs / RunDetail
+│       ├── components/           RunDialog、VerdictTag、StatusTag、EnvTypeTag、ThresholdTable、StepLatencyChart、KeyValueEditor、PageHeader
 │       ├── api/                  唯一的数据访问层：http.ts、types.ts（与契约对应）、index.ts
-│       ├── composables/          useResourceList、useStartRun
+│       ├── composables/          useResourceList、useStartRun（含生产环境二次确认）
 │       ├── utils/                格式化、判定的显示、负载配置和 SLO 的描述
 │       └── router.ts / App.vue / main.ts / styles.css
 │
@@ -733,7 +743,7 @@ AI-Performance-Engineering/
 │   以下由脚本或运行时生成，全部不入 git：
 ├── .tools/                       k6 v2.3.0（bin/k6）、Node v24.21.0（node/）
 ├── .venv/                        Python 虚拟环境（uv）
-├── data/app.db                   SQLite 数据库
+├── data/app.db                   SQLite 数据库（表结构升级时旁边会多一份 app.db.v<旧版本>.bak）
 ├── results/<runId>/              每次运行的产物（§3.7）
 ├── logs/                         server.log、server.pid
 └── web/dist/、web/node_modules/   前端构建产物和依赖
@@ -829,7 +839,7 @@ k6 inspect perf/runner.js -e PLAN_FILE=<plan.json 的绝对路径>
 - [ ] 前端计算判定，或绕过 `web/src/api/` 直接请求？
 - [ ] 前端嵌入或链接 k6 实时仪表盘（`:5665`）？
 - [ ] 改了三方接口却没有先改 `plans/mvp-contract.md`？
-- [ ] 调高了第三方目标环境的流量上限，或绕过预检启动 k6 对外加压？
+- [ ] 调高了第三方目标环境的安全上限、把它改成非生产类型，或绕过预检启动 k6 对外加压？
 - [ ] 新增的抽象与当前功能无关？
 - [ ] AI 代码写入 Verdict、调用 k6、或读取原始样本？
 
@@ -906,13 +916,14 @@ k6 inspect perf/runner.js -e PLAN_FILE=<plan.json 的绝对路径>
 
 | 页面 | 路由 | 内容 | 后端接口 |
 |---|---|---|---|
-| 概览 | `/` | 各类定义和运行的数量、判定分布、最近 10 次运行 | `GET /api/overview` |
-| 环境 | `/environments` | 增删改查：名称、基础地址、公共请求头、流量上限（最大并发、最大到达率、最长时长） | `/api/environments` |
+| 概览 | `/` | 各类定义、执行机和运行的数量、判定分布、最近 10 次运行 | `GET /api/overview` |
+| 执行机 | `/executors` | 查看运行 k6 的机器：主机名、IP、系统、CPU、内存、负载、磁盘、k6 / Python / uv 版本、项目目录、当前状态；只能改名称和备注。运行中时每 3 秒刷新 | `/api/executors` |
+| 被测环境 | `/environments` | 增删改查：名称、类型（开发 / 测试 / 预发 / 生产）、基础地址、公共请求头、安全上限（最大并发、最大到达率、最长时长；生产必填，其他类型留空表示不限制） | `/api/environments` |
 | 接口 | `/apis` | 增删改查：方法、路径、请求头、请求体、期望状态码、期望包含的文本、变量提取 | `/api/apis` |
 | 业务流程 | `/flows` | 增删改查：按顺序排列接口步骤，设置每步的等待时间 | `/api/flows` |
 | 负载配置 | `/profiles` | 增删改查：类型标签、open / closed、四种形态的参数 | `/api/profiles` |
-| 测试 | `/tests` | 增删改查：选择流程和权重、设置验收标准；显示最近一次运行；**发起运行**（选负载配置和环境，对照环境上限） | `/api/tests`、`POST /api/runs` |
-| 运行列表 | `/runs` | 按测试 / 判定 / 状态 / 存档筛选，分页；列：开始时间、测试、负载配置、环境、状态、判定、p95、错误率、请求数、备注；存档、删除 | `GET /api/runs`、`PATCH`、`DELETE` |
+| 测试 | `/tests` | 增删改查：选择流程和权重、设置验收标准；显示最近一次运行；**发起运行**（选负载配置和被测环境，显示执行机，对照安全上限；被测环境是生产时要二次确认） | `/api/tests`、`POST /api/runs` |
+| 运行列表 | `/runs` | 按测试 / 判定 / 状态 / 存档筛选，分页；列：开始时间、测试、负载配置、被测环境（带类型标签）、状态、判定、p95、错误率、请求数、备注；存档、删除 | `GET /api/runs`、`PATCH`、`DELETE` |
 | 运行详情 | `/runs/:runId` | 见 §8.3 | `GET /api/runs/:runId`、`/stop`、`/artifacts/:name` |
 
 侧栏底部显示 k6 版本；有运行正在进行时给出全局入口（每 5 秒查询一次 `/api/system`）。
@@ -925,8 +936,9 @@ k6 inspect perf/runner.js -e PLAN_FILE=<plan.json 的绝对路径>
 
 | 顺序 | 区块 | 内容 | 数据来源 |
 |---|---|---|---|
-| 1 | 判定横幅 | 判定、原因（`verdictReason`）、负载配置、环境、开始时间、用时、k6 退出码、k6 版本 | Run Record |
+| 1 | 判定横幅 | 判定、原因（`verdictReason`）、负载配置、被测环境及其类型、执行机、开始时间、用时、k6 退出码、k6 版本 | Run Record |
 | 2 | 有效性检查 | validity 阈值逐条的结果 | `record.thresholds` |
+| 2a | 执行机 | 主机、CPU 核数、运行期间的 CPU 平均 / 峰值占用、内存峰值占用、采样次数；注明"仅供参考，不参与判定"。旧运行没有这项数据时不显示 | `record.executor` |
 | 3 | 验收标准 | slo 阈值逐条的结果；判定为 `invalid` 时整体置灰 | `record.thresholds` |
 | 4 | 总体指标 | 请求数、RPS、迭代数、丢弃的迭代数、响应时间各分位、错误率、检查通过率、流量 | `record.metrics.overall` |
 | 5 | 分步骤指标 | 每个步骤的请求数、平均 / p50 / p95 / p99 / 最大、错误率；没发出请求的步骤单独标出 | `record.metrics.steps` |
@@ -937,25 +949,28 @@ k6 inspect perf/runner.js -e PLAN_FILE=<plan.json 的绝对路径>
 
 k6 没有产出指标时（判定为 `error` 等），第 2–6 块换成一段说明和 `k6.log` 的最后 60 行。
 
-页头的操作：停止（运行中）/ 再次运行（结束后，用同一个测试、负载配置、环境的**当前**定义重新发起，不是当时的快照）、存档 / 取消存档、删除（运行中或已存档时不可用）、修改备注。
+页头的操作：停止（运行中）/ 再次运行（结束后，用同一个测试、负载配置、被测环境的**当前**定义重新发起，不是当时的快照；被测环境现在是生产时同样要二次确认）、存档 / 取消存档、删除（运行中或已存档时不可用）、修改备注。
 
 ### 8.4 前后端架构与后端接口
 
 ```mermaid
 flowchart LR
     subgraph WEB["web/（单页应用，history 路由）"]
-        PAGES["views：8 个页面"] --> APIC["src/api 数据访问层"]
+        PAGES["views：9 个页面"] --> APIC["src/api 数据访问层"]
     end
     subgraph SRV["server/（FastAPI，单进程）"]
         RESR["resources + validators<br/>定义的增删改查"]
         RUNS["runs<br/>预检 / 编排 / 判定 / 产物"]
+        EXE["executors<br/>执行机信息 / 运行期间采样"]
         SYS["system<br/>概览 / 系统信息"]
         STATIC["托管 web/dist"]
     end
     DB[("data/app.db")]
     FS[("results/runId/")]
     K6["k6 子进程"]
-    APIC -->|"REST /api"| RESR & RUNS & SYS
+    APIC -->|"REST /api"| RESR & RUNS & EXE & SYS
+    RUNS --> EXE
+    EXE --> DB
     RESR --> DB
     RUNS --> DB
     SYS --> DB
@@ -967,7 +982,8 @@ flowchart LR
 | 接口 | 说明 |
 |---|---|
 | `GET / POST /api/<res>`，`GET / PUT / DELETE /api/<res>/:id` | 定义类资源统一的增删改查，`<res>` = `environments`、`apis`、`flows`、`profiles`、`tests`。`PUT` 整体替换；被引用的接口和流程删除时返回 409 |
-| `POST /api/runs` | 发起运行：`{testId, profileId, envId, note}`。成功返回 201；预检不通过 422；已有运行 409 |
+| `GET /api/executors`，`GET / PUT /api/executors/:id` | 执行机。目前恒为 1 项（本机），没有新增和删除；`PUT` 只能改名称和备注 |
+| `POST /api/runs` | 发起运行：`{testId, profileId, envId, executorId?, confirmProd?, note}`。`executorId` 省略时用本机执行机；被测环境是生产时必须带 `confirmProd: true`。成功返回 201；预检不通过 422；已有运行 409 |
 | `GET /api/runs?testId=&verdict=&status=&archived=&page=&pageSize=` | 运行列表，按开始时间倒序，返回 `{items, total}` |
 | `GET /api/runs/:runId` | 运行详情：含 `snapshot`、`record`、`artifacts`、`progress` |
 | `POST /api/runs/:runId/stop` | 停止正在进行的运行 |
@@ -994,7 +1010,8 @@ flowchart LR
 
 | 护栏 | 作用 | 缺口 |
 |---|---|---|
-| 环境流量上限（预检强制） | 负载配置超过环境的并发、到达率、时长上限时拒绝发起 | **上限本身可以在页面上修改**；对百度环境"不得调高"只靠约定 |
+| 被测环境的安全上限（预检强制） | 负载配置超过被测环境的并发、到达率、时长上限时拒绝发起 | **上限本身可以在页面上修改**；对百度环境"不得调高"只靠约定。**非生产类型可以不设上限**：新建一个类型为开发、不设上限、地址指向第三方站点的环境，预检不会拦 |
+| 环境类型 + 生产环境二次确认 | 类型为生产的被测环境三项上限必填；发起运行时必须显式确认 | 类型由使用者自己选，可以在页面上改；确认只是多点一次，不是审批 |
 | 同一时间只允许 1 个运行 | 不会叠加负载 | — |
 | `gracefulStop` 5 秒、到达率不自动扩容、失败不空转 | 实际流量不超过设定值 | 没有失控自动中止 |
 | 引用保护、存档保护 | 被引用的定义和已存档的运行不能删除 | — |
@@ -1002,8 +1019,8 @@ flowchart LR
 
 **没有的护栏**：
 
-- **没有登录、权限和审计**。服务监听 `0.0.0.0:8088`，跨域全部放行。能访问这个端口的人都可以改定义、改环境上限、发起运行。只适合在可信的内网里单人或小范围使用；
-- **没有目标白名单**。任何合法的 http / https 地址都能建成环境；k6 自动跟随重定向，请求可能到达 `baseUrl` 以外的主机；
+- **没有登录、权限和审计**。服务监听 `0.0.0.0:8088`，跨域全部放行。能访问这个端口的人都可以改定义、改被测环境的类型和安全上限、发起运行。只适合在可信的内网里单人或小范围使用；
+- **没有目标白名单**。任何合法的 http / https 地址都能建成被测环境，并且可以标成非生产、不设上限；k6 自动跟随重定向，请求可能到达 `baseUrl` 以外的主机；
 - **定义的修改没有审核和历史**。只有 `updatedAt`；能追溯的只有每次运行的配置快照；
 - **没有凭据管理**。请求头明文存库并进入快照和产物。
 
@@ -1128,7 +1145,7 @@ flowchart LR
 | 任何 AI（Agent / RAG / 向量库 / MCP / LLM 报告） | 基线、证据、评估数据都还没有 | Phase 4 评估通过 |
 | AI 判定 Pass / Fail、AI 或 agent 发起压测 | 不可复现、爆炸半径 | 永不 |
 | 自建自然语言写脚本、录制、关联 | 现成工具已提供 | 不自建 |
-| 调高第三方目标（百度）环境的流量上限；对第三方站点做冒烟以上的测试 | 不是自己的系统 | 永不。压力测试只对自有系统 |
+| 调高第三方目标（百度）环境的安全上限，或把它改成非生产类型；对第三方站点做冒烟以上的测试 | 不是自己的系统 | 永不。压力测试只对自有系统 |
 | 登录、用户、权限、审计 | MVP 在可信内网单人使用 | 多人使用或暴露到不可信网络之前必须先做 |
 | 多个运行同时进行 | k6 进程句柄在内存里，仪表盘端口固定，服务单进程 | 需要并行时重新设计运行编排 |
 | 单元测试套件、测试框架 | 用户决定：禁止过度测试，靠真实运行验证 | 用户改变决定 |

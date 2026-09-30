@@ -165,7 +165,7 @@ function openRun(row: TestDef): void {
   <div class="page">
     <PageHeader
       title="测试"
-      description="一个测试 = 要执行哪些业务流程（按权重混合）+ 验收标准。发起运行时再选负载配置和环境。"
+      description="一个测试 = 要执行哪些业务流程（按权重混合）+ 验收标准。发起运行时再选负载配置和被测环境。"
     >
       <el-button type="primary" :icon="Plus" @click="openCreate">新建测试</el-button>
     </PageHeader>

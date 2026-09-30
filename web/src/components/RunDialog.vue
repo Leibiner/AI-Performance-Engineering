@@ -1,12 +1,22 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { environmentsApi, profilesApi, type Environment, type Profile, type TestDef } from '../api'
+import {
+  environmentsApi,
+  executorsApi,
+  profilesApi,
+  type Environment,
+  type Executor,
+  type Profile,
+  type TestDef,
+} from '../api'
 import { useStartRun } from '../composables/useStartRun'
 import { showError } from '../utils/feedback'
+import { formatLimit } from '../utils/env'
 import { MODEL_LABELS, demandOf, describeConfig } from '../utils/profile'
 import { DASH } from '../utils/format'
+import EnvTypeTag from './EnvTypeTag.vue'
 
-// 发起运行的对话框：选负载配置和环境，显示环境的流量上限，确认后 POST /api/runs。
+// 发起运行的对话框：选负载配置和被测环境，显示执行机和安全上限，确认后 POST /api/runs。
 const visible = defineModel<boolean>({ required: true })
 const props = defineProps<{ test: TestDef | null }>()
 
@@ -14,6 +24,8 @@ const { starting, start } = useStartRun()
 
 const profiles = ref<Profile[]>([])
 const environments = ref<Environment[]>([])
+/** 将使用的执行机。目前只有本机一台，所以不提供选择 */
+const executor = ref<Executor | null>(null)
 const loading = ref(false)
 const profileId = ref<number>()
 const envId = ref<number>()
@@ -24,24 +36,32 @@ const rejection = ref<{ message: string; details: string[] } | null>(null)
 const profile = computed(() => profiles.value.find((p) => p.id === profileId.value) ?? null)
 const environment = computed(() => environments.value.find((e) => e.id === envId.value) ?? null)
 
-/** 负载配置的需求与环境上限的对照。只是提示，最终以后端预检为准。 */
+const over = (need: number | null | undefined, limit: number | null | undefined): boolean =>
+  typeof need === 'number' && typeof limit === 'number' && need > limit
+
+/** 负载配置的需求与被测环境安全上限的对照。上限为空表示不限制，不参与比较。只是提示，最终以后端预检为准。 */
 const limitRows = computed(() => {
   const env = environment.value
   if (!env) return []
   const demand = profile.value ? demandOf(profile.value.model, profile.value.config) : null
   return [
-    { name: '并发', need: demand ? `${demand.vus}` : DASH, limit: `${env.maxVus}`, over: !!demand && demand.vus > env.maxVus },
+    {
+      name: '并发',
+      need: demand ? `${demand.vus}` : DASH,
+      limit: formatLimit(env.maxVus),
+      over: over(demand?.vus, env.maxVus),
+    },
     {
       name: '到达率',
       need: demand ? (demand.rate === null ? '不适用（closed 模型）' : `每秒 ${demand.rate} 次`) : DASH,
-      limit: `每秒 ${env.maxRate} 次`,
-      over: !!demand && demand.rate !== null && demand.rate > env.maxRate,
+      limit: env.maxRate == null ? '不限制' : `每秒 ${env.maxRate} 次`,
+      over: over(demand?.rate, env.maxRate),
     },
     {
       name: '总时长',
       need: demand ? `${demand.durationSec} 秒` : DASH,
-      limit: `${env.maxDurationSec} 秒`,
-      over: !!demand && demand.durationSec > env.maxDurationSec,
+      limit: formatLimit(env.maxDurationSec, '秒'),
+      over: over(demand?.durationSec, env.maxDurationSec),
     },
   ]
 })
@@ -57,9 +77,19 @@ async function loadOptions(): Promise<void> {
     if (p.length === 1) profileId.value = p[0].id
     if (e.length === 1) envId.value = e[0].id
   } catch (err) {
-    showError(err, '加载负载配置和环境失败')
+    showError(err, '加载负载配置和被测环境失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadExecutor(): Promise<void> {
+  // 取不到执行机不影响发起：请求里不带 executorId，后端默认用本机执行机
+  try {
+    const list = await executorsApi.list()
+    executor.value = list[0] ?? null
+  } catch {
+    executor.value = null
   }
 }
 
@@ -70,6 +100,7 @@ watch(visible, (open) => {
   note.value = ''
   rejection.value = null
   void loadOptions()
+  void loadExecutor()
 })
 
 // 改了选择后，上一次的拒绝原因不再适用
@@ -78,11 +109,20 @@ watch([profileId, envId], () => {
 })
 
 async function confirm(): Promise<void> {
-  if (!props.test || profileId.value === undefined || envId.value === undefined) return
+  const env = environment.value
+  if (!props.test || profileId.value === undefined || !env) return
   rejection.value = null
   const ok = await start(
-    { testId: props.test.id, profileId: profileId.value, envId: envId.value, note: note.value },
     {
+      testId: props.test.id,
+      profileId: profileId.value,
+      envId: env.id,
+      ...(executor.value ? { executorId: executor.value.id } : {}),
+      note: note.value,
+    },
+    {
+      // 被测环境是生产时，start 会先弹二次确认
+      env,
       onPreflightRejected: (error) => {
         rejection.value = { message: error.message, details: error.details }
       },
@@ -93,7 +133,7 @@ async function confirm(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog v-model="visible" title="发起运行" width="680px" :close-on-click-modal="false">
+  <el-dialog v-model="visible" title="发起运行" width="700px" top="8vh" :close-on-click-modal="false">
     <el-form v-loading="loading" label-width="90px">
       <el-form-item label="测试">
         <strong>{{ test?.name }}</strong>
@@ -106,22 +146,45 @@ async function confirm(): Promise<void> {
           {{ MODEL_LABELS[profile.model] }}：{{ describeConfig(profile.model, profile.config) }}
         </div>
       </el-form-item>
-      <el-form-item label="环境" required>
-        <el-select v-model="envId" placeholder="选择环境" style="width: 100%" no-data-text="还没有环境">
-          <el-option v-for="e in environments" :key="e.id" :label="e.name" :value="e.id" />
+      <el-form-item label="被测环境" required>
+        <el-select v-model="envId" placeholder="选择被测环境" style="width: 100%" no-data-text="还没有被测环境">
+          <el-option v-for="e in environments" :key="e.id" :label="e.name" :value="e.id">
+            <span class="env-option">
+              <span>{{ e.name }}</span>
+              <EnvTypeTag :type="e.type" />
+            </span>
+          </el-option>
         </el-select>
-        <div v-if="environment" class="form-hint">
-          请求会发往 <span class="mono">{{ environment.baseUrl }}</span>
+        <div v-if="environment" class="form-hint env-hint">
+          <EnvTypeTag :type="environment.type" />
+          <span>
+            请求会发往 <span class="mono">{{ environment.baseUrl }}</span>
+          </span>
+        </div>
+        <div v-if="environment?.type === 'prod'" class="form-hint limit-warn">
+          这是生产环境。点“开始运行”后会再确认一次。
         </div>
       </el-form-item>
 
-      <el-form-item v-if="environment" label="流量上限">
+      <el-form-item label="执行机">
+        <template v-if="executor">
+          <span>{{ executor.name }}</span>
+          <span class="muted executor-host">
+            主机 <span class="mono">{{ executor.host ?? DASH }}</span>
+            <template v-if="executor.ip"> · <span class="mono">{{ executor.ip }}</span></template>
+          </span>
+        </template>
+        <span v-else class="muted">本机执行机（默认）</span>
+        <div class="form-hint">k6 在这台机器上运行，并从它向被测环境发出请求。</div>
+      </el-form-item>
+
+      <el-form-item v-if="environment" label="安全上限">
         <table class="limit-table">
           <thead>
             <tr>
               <th />
               <th>负载配置需要</th>
-              <th>环境上限</th>
+              <th>被测环境的上限</th>
               <th />
             </tr>
           </thead>
@@ -129,13 +192,13 @@ async function confirm(): Promise<void> {
             <tr v-for="row in limitRows" :key="row.name" :class="{ 'is-over': row.over }">
               <td>{{ row.name }}</td>
               <td>{{ row.need }}</td>
-              <td>{{ row.limit }}</td>
+              <td :class="{ muted: row.limit === '不限制' }">{{ row.limit }}</td>
               <td>{{ row.over ? '超过上限' : '' }}</td>
             </tr>
           </tbody>
         </table>
         <div v-if="overLimit" class="form-hint limit-warn">
-          这个负载配置超过了环境的流量上限，发起后会被预检拒绝。请换一个负载配置，或者调整环境的上限。
+          这个负载配置超过了被测环境的安全上限，发起后会被预检拒绝。请换一个负载更小的负载配置，或者换一个允许这个流量的被测环境。安全上限是对目标系统的保护，不要为了让运行通过而调高它。
         </div>
       </el-form-item>
 
@@ -165,6 +228,21 @@ async function confirm(): Promise<void> {
 </template>
 
 <style scoped>
+.env-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.env-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.executor-host {
+  margin-left: 10px;
+  font-size: 13px;
+}
 .limit-table {
   width: 100%;
   border-collapse: collapse;

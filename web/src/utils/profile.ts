@@ -74,7 +74,7 @@ export function shapeOf(model: LoadModel, config: ProfileConfig): ProfileShape {
   return 'stages' in config ? 'ramping' : 'rate'
 }
 
-/** 负载配置对环境上限的需求，用于在发起运行前和环境上限对照。 */
+/** 负载配置的需求，用于在发起运行前和被测环境的安全上限对照。 */
 export interface ProfileDemand {
   /** 并发：vus 或 preAllocatedVus */
   vus: number

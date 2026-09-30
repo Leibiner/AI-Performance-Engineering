@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 
-from . import config, db, errors, resources, runs, seed, system
+from . import config, db, errors, executors, resources, runs, seed, system
 
 log = logging.getLogger("uvicorn.error")
 
@@ -50,6 +50,7 @@ app.add_middleware(
 for router in resources.routers:
     app.include_router(router)
 app.include_router(runs.router)
+app.include_router(executors.router)
 app.include_router(system.router)
 
 

@@ -2,10 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Refresh } from '@element-plus/icons-vue'
-import { overviewApi, type Overview } from '../api'
+import { executorsApi, overviewApi, type Overview } from '../api'
 import { showError } from '../utils/feedback'
 import { formatCount, formatMs, formatPercent, formatTime } from '../utils/format'
 import { VERDICTS, VERDICT_ORDER } from '../utils/verdict'
+import EnvTypeTag from '../components/EnvTypeTag.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
 import VerdictTag from '../components/VerdictTag.vue'
@@ -13,6 +14,8 @@ import VerdictTag from '../components/VerdictTag.vue'
 const router = useRouter()
 const data = ref<Overview | null>(null)
 const loading = ref(false)
+/** counts 里没有 executors 时（契约 §3.4 没列这一项），自己数一次 */
+const executorCount = ref<number | null>(null)
 
 let refreshTimer: number | undefined
 let disposed = false
@@ -22,6 +25,14 @@ async function load(silent = false): Promise<void> {
   if (!silent) loading.value = true
   try {
     data.value = await overviewApi.get()
+    if (data.value.counts?.executors === undefined && executorCount.value === null) {
+      executorsApi
+        .list()
+        .then((list) => {
+          executorCount.value = list.length
+        })
+        .catch(() => undefined)
+    }
   } catch (e) {
     if (!silent) showError(e, '加载概览失败')
   } finally {
@@ -42,7 +53,8 @@ onBeforeUnmount(() => {
 const countCards = computed(() => {
   const c = data.value?.counts
   return [
-    { label: '环境', value: c?.environments, to: '/environments' },
+    { label: '执行机', value: c?.executors ?? executorCount.value, to: '/executors' },
+    { label: '被测环境', value: c?.environments, to: '/environments' },
     { label: '接口', value: c?.apis, to: '/apis' },
     { label: '业务流程', value: c?.flows, to: '/flows' },
     { label: '负载配置', value: c?.profiles, to: '/profiles' },
@@ -61,7 +73,7 @@ const verdictRows = computed(() => {
 
 <template>
   <div v-loading="loading" class="page">
-    <PageHeader title="概览" description="先维护环境、接口、业务流程、负载配置，再把它们组合成测试，然后发起运行。">
+    <PageHeader title="概览" description="先维护被测环境、接口、业务流程、负载配置，再把它们组合成测试，然后从执行机发起运行。">
       <el-button :icon="Refresh" @click="load()">刷新</el-button>
     </PageHeader>
 
@@ -123,7 +135,11 @@ const verdictRows = computed(() => {
         </el-table-column>
         <el-table-column prop="testName" label="测试" min-width="160" show-overflow-tooltip />
         <el-table-column prop="profileName" label="负载配置" min-width="110" show-overflow-tooltip />
-        <el-table-column prop="envName" label="环境" min-width="130" show-overflow-tooltip />
+        <el-table-column label="被测环境" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <EnvTypeTag :type="row.envType" class="env-tag" />{{ row.envName }}
+          </template>
+        </el-table-column>
         <el-table-column label="判定" width="110">
           <template #default="{ row }">
             <StatusTag v-if="row.status === 'running'" :status="row.status" />
@@ -160,7 +176,7 @@ const verdictRows = computed(() => {
 
 .count-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 12px;
   margin-bottom: 16px;
 }
@@ -219,6 +235,9 @@ const verdictRows = computed(() => {
   border-radius: 2px;
 }
 
+.env-tag {
+  margin-right: 6px;
+}
 .more-link {
   margin-left: auto;
   color: var(--el-color-primary);
@@ -240,7 +259,7 @@ const verdictRows = computed(() => {
 
 @media (max-width: 1100px) {
   .count-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 </style>

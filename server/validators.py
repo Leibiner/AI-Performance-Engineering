@@ -16,6 +16,13 @@ from .errors import bad_request
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 PROFILE_TYPES = ("smoke", "average", "stress", "spike", "soak", "breakpoint")
 MODELS = ("closed", "open")
+ENV_TYPES = ("dev", "test", "staging", "prod")
+ENV_TYPE_LABELS = {"dev": "开发", "test": "测试", "staging": "预发", "prod": "生产"}
+ENV_LIMITS = (
+    ("maxVus", "maxVus（并发上限）"),
+    ("maxRate", "maxRate（到达率上限，每秒迭代数）"),
+    ("maxDurationSec", "maxDurationSec（时长上限，秒）"),
+)
 EXTRACT_FROM = ("json", "regex", "header")
 SLO_KEYS = ("p95Ms", "p99Ms", "errorRate", "checksRate")
 _VAR_RE = re.compile(r"^\w+$")
@@ -118,9 +125,22 @@ def validate_environment(data: Any, conn: sqlite3.Connection) -> dict:
         # 去掉末尾的 /，接口的 path 以 / 开头，拼起来不会出现 //
         out["baseUrl"] = data["baseUrl"].strip().rstrip("/")
     out["headers"] = c.headers()
-    out["maxVus"] = c.positive("maxVus", "maxVus（并发上限）")
-    out["maxRate"] = c.positive("maxRate", "maxRate（到达率上限，每秒迭代数）")
-    out["maxDurationSec"] = c.positive("maxDurationSec", "maxDurationSec（时长上限，秒）")
+
+    env_type = data.get("type")
+    if env_type not in ENV_TYPES:
+        c.err("type（被测环境类型）必填，且必须是 dev（开发）/ test（测试）/ staging（预发）/ prod（生产）之一")
+    out["type"] = env_type
+
+    # 三个安全上限：正数，或 null（不限制）。生产环境三项都必须填
+    for key, label in ENV_LIMITS:
+        value = data.get(key)
+        if value is None:
+            if env_type == "prod":
+                c.err(f"{label}：生产环境必须填写安全上限，不能留空")
+        elif not is_num(value) or value <= 0:
+            c.err(f"{label}：必须是正数，或留空（null）表示不限制")
+            value = None
+        out[key] = value
     out["note"] = c.note()
     c.done()
     return out

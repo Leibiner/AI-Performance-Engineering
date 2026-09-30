@@ -3,7 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Download, Loading, RefreshRight, TopRight, VideoPause } from '@element-plus/icons-vue'
-import { ApiError, runsApi, type ArtifactName, type Run } from '../api'
+import { ApiError, environmentsApi, runsApi, type ArtifactName, type Run } from '../api'
+import type { StartEnv } from '../composables/useStartRun'
 import { useStartRun } from '../composables/useStartRun'
 import { confirmAction, errorMessage, showError } from '../utils/feedback'
 import {
@@ -17,9 +18,11 @@ import {
   formatPercent,
   formatTime,
 } from '../utils/format'
+import { envTypeLabel } from '../utils/env'
 import { MODEL_LABELS, demandOf, describeConfig } from '../utils/profile'
 import { sloItems } from '../utils/slo'
 import { VERDICTS } from '../utils/verdict'
+import EnvTypeTag from '../components/EnvTypeTag.vue'
 import StepLatencyChart from '../components/StepLatencyChart.vue'
 import ThresholdTable from '../components/ThresholdTable.vue'
 
@@ -122,6 +125,23 @@ const steps = computed(() => record.value?.metrics?.steps ?? [])
 // 至少有一个步骤有样本才画图；没有样本的步骤在图上留空
 const chartable = computed(() => steps.value.some((s) => s.p50 !== null || s.p95 !== null || s.p99 !== null))
 const multiFlow = computed(() => new Set(steps.value.map((s) => s.flowKey)).size > 1)
+
+const pct = (value: number | null | undefined): string =>
+  value === null || value === undefined ? DASH : `${formatNumber(value, 1)}%`
+
+/** 运行期间对执行机的采样（record.executor）。旧的运行记录没有，返回 null */
+const executorStats = computed(() => {
+  const x = record.value?.executor
+  if (!x) return null
+  return [
+    { label: '主机', value: x.host ?? DASH, text: true },
+    { label: 'CPU 核数', value: x.cpuCores === null || x.cpuCores === undefined ? DASH : `${x.cpuCores} 核`, text: false },
+    { label: 'CPU 平均占用', value: pct(x.cpuAvgPct) },
+    { label: 'CPU 峰值占用', value: pct(x.cpuMaxPct) },
+    { label: '内存峰值占用', value: pct(x.memMaxPct) },
+    { label: '采样次数', value: formatCount(x.samples) },
+  ]
+})
 
 const elapsed = computed(() => (run.value ? elapsedMs(run.value.startedAt, run.value.endedAt, now.value) : 0))
 
@@ -276,15 +296,32 @@ async function rerun(): Promise<void> {
   const r = run.value
   if (!r) return
   if (r.testId === null || r.profileId === null || r.envId === null) {
-    ElMessage.warning('这次运行用到的测试、负载配置或环境已经被删除，无法再次运行')
+    ElMessage.warning('这次运行用到的测试、负载配置或被测环境已经被删除，无法再次运行')
     return
   }
   const ok = await confirmAction(
-    `用同样的测试「${r.testName}」、负载配置「${r.profileName}」、环境「${r.envName}」再运行一次？如果这些定义在上次运行后被修改过，会按现在的内容执行。`,
+    `用同样的测试「${r.testName}」、负载配置「${r.profileName}」、被测环境「${r.envName}」再运行一次？如果这些定义在上次运行后被修改过，会按现在的内容执行。`,
     '再次运行',
   )
   if (!ok) return
-  await start({ testId: r.testId, profileId: r.profileId, envId: r.envId, note: '' })
+  // 按被测环境现在的类型决定要不要二次确认（类型可能在上次运行后改过）。
+  // 取不到时用上次运行记下的类型和地址；环境已被删除的情况由后端预检拒绝。
+  let env: StartEnv | null = null
+  try {
+    env = await environmentsApi.get(r.envId)
+  } catch {
+    env = r.envType ? { name: r.envName, baseUrl: r.snapshot?.env?.baseUrl ?? '', type: r.envType } : null
+  }
+  await start(
+    {
+      testId: r.testId,
+      profileId: r.profileId,
+      envId: r.envId,
+      ...(typeof r.executorId === 'number' ? { executorId: r.executorId } : {}),
+      note: '',
+    },
+    { env },
+  )
 }
 </script>
 
@@ -360,7 +397,11 @@ async function rerun(): Promise<void> {
           <dl class="meta-grid progress-meta">
             <div><dt>测试</dt><dd>{{ run.testName }}</dd></div>
             <div><dt>负载配置</dt><dd>{{ run.profileName }}</dd></div>
-            <div><dt>环境</dt><dd>{{ run.envName }}</dd></div>
+            <div>
+              <dt>被测环境</dt>
+              <dd>{{ run.envName }} <EnvTypeTag :type="run.envType" /></dd>
+            </div>
+            <div v-if="run.executorName"><dt>执行机</dt><dd>{{ run.executorName }}</dd></div>
             <div><dt>开始时间</dt><dd class="num">{{ formatTime(run.startedAt) }}</dd></div>
           </dl>
           <p class="form-hint">图表在运行结束后显示（k6 导出的报告）。</p>
@@ -379,7 +420,14 @@ async function rerun(): Promise<void> {
           </div>
           <dl class="verdict-meta">
             <div><dt>负载配置</dt><dd>{{ run.profileName }}</dd></div>
-            <div><dt>环境</dt><dd>{{ run.envName }}</dd></div>
+            <div>
+              <dt>被测环境</dt>
+              <dd>
+                {{ run.envName }}
+                <span v-if="run.envType" class="banner-pill">{{ envTypeLabel(run.envType) }}</span>
+              </dd>
+            </div>
+            <div v-if="run.executorName"><dt>执行机</dt><dd>{{ run.executorName }}</dd></div>
             <div><dt>开始时间</dt><dd class="num">{{ formatTime(run.startedAt) }}</dd></div>
             <div><dt>用时</dt><dd class="num">{{ formatDuration(elapsedMs(run.startedAt, run.endedAt)) }}</dd></div>
             <div><dt>k6 退出码</dt><dd class="num">{{ run.exitCode ?? DASH }}</dd></div>
@@ -399,17 +447,32 @@ async function rerun(): Promise<void> {
           </template>
         </div>
 
-        <template v-else>
-          <!-- 2. 有效性检查 -->
-          <div class="panel">
-            <h2 class="panel-title">
-              有效性检查
-              <small>这次测试本身是否可信。任何一项未通过，判定为“测试无效”</small>
-            </h2>
-            <ThresholdTable v-if="validityThresholds.length" :thresholds="validityThresholds" />
-            <p v-else class="muted empty-line">这次运行没有有效性检查项。</p>
-          </div>
+        <!-- 2. 有效性检查 -->
+        <div v-if="hasMetrics" class="panel">
+          <h2 class="panel-title">
+            有效性检查
+            <small>这次测试本身是否可信。任何一项未通过，判定为“测试无效”</small>
+          </h2>
+          <ThresholdTable v-if="validityThresholds.length" :thresholds="validityThresholds" />
+          <p v-else class="muted empty-line">这次运行没有有效性检查项。</p>
+        </div>
 
+        <!-- 执行机在运行期间的资源占用。旧的运行记录没有这一项，不显示 -->
+        <div v-if="executorStats" class="panel">
+          <h2 class="panel-title">
+            执行机
+            <small>{{ record?.executor?.name }}（发起压测的机器）在运行期间的资源占用。仅供参考，不参与判定</small>
+          </h2>
+          <div class="stat-grid">
+            <div v-for="item in executorStats" :key="item.label" class="stat">
+              <div class="stat-label">{{ item.label }}</div>
+              <div class="stat-value" :class="{ 'is-text': item.text }">{{ item.value }}</div>
+            </div>
+          </div>
+          <p v-if="record?.executor?.samples === 0" class="form-hint">运行期间没有采到样本（运行太短或采样失败），所以占用率为空。</p>
+        </div>
+
+        <template v-if="hasMetrics">
           <!-- 3. 验收标准 -->
           <div class="panel">
             <h2 class="panel-title">
@@ -536,7 +599,13 @@ async function rerun(): Promise<void> {
         </h2>
         <template v-if="snapshot">
           <dl class="meta-grid snapshot-summary">
-            <div><dt>目标地址</dt><dd class="mono">{{ snapshot.env?.baseUrl ?? DASH }}</dd></div>
+            <div>
+              <dt>被测环境</dt>
+              <dd>
+                <EnvTypeTag :type="snapshot.env?.type" />
+                <span class="mono">{{ snapshot.env?.baseUrl ?? DASH }}</span>
+              </dd>
+            </div>
             <div v-if="snapshot.profile?.config">
               <dt>负载</dt>
               <dd>
@@ -671,9 +740,20 @@ async function rerun(): Promise<void> {
   background: rgba(0, 0, 0, 0.18);
   font-size: 13px;
 }
+.banner-pill {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 7px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  vertical-align: middle;
+}
 .verdict-meta {
   display: grid;
-  grid-template-columns: repeat(3, auto);
+  grid-template-columns: repeat(4, auto);
   gap: 14px 32px;
   margin: 0;
 }
@@ -773,6 +853,13 @@ async function rerun(): Promise<void> {
   margin-top: 4px;
   font-size: 18px;
   font-weight: 600;
+}
+.stat-value.is-text {
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 26px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .stat.is-warn {
   border-color: #f0c78a;

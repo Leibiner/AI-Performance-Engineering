@@ -91,6 +91,7 @@ def overview():
 
     with db.connect() as conn:
         counts = {res.name: conn.execute(f"SELECT COUNT(*) FROM {res.name}").fetchone()[0] for res in RESOURCES}
+        counts["executors"] = conn.execute("SELECT COUNT(*) FROM executors").fetchone()[0]
         counts["runs"] = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
         verdicts = {v: 0 for v in VERDICTS}
         for row in conn.execute("SELECT verdict, COUNT(*) AS n FROM runs WHERE verdict IS NOT NULL GROUP BY verdict"):

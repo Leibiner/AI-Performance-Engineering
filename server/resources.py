@@ -137,9 +137,10 @@ def _guard_flow_delete(flow_id: int, conn: sqlite3.Connection) -> None:
 
 ENVIRONMENTS = Resource(
     name="environments",
-    label="环境",
+    label="被测环境",
     fields=(
         Field("name", "name"),
+        Field("type", "type"),
         Field("baseUrl", "base_url"),
         Field("headers", "headers", json=True),
         Field("maxVus", "max_vus"),

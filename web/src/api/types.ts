@@ -7,16 +7,54 @@ export interface Stamped {
   updatedAt: string
 }
 
-// ---------- 环境 ----------
+// ---------- 执行机（契约 §3.3） ----------
+
+/** 执行机：安装了本项目、实际运行 k6 的机器。目前只有本机一台，没有新增和删除。 */
+export interface Executor extends Stamped {
+  name: string
+  kind: 'local' | string
+  note: string
+  // 以下字段每次请求时实时采集，取不到的为 null
+  host: string | null
+  ip: string | null
+  os: string | null
+  arch: string | null
+  cpuCores: number | null
+  memTotalMb: number | null
+  memAvailableMb: number | null
+  loadAvg1: number | null
+  diskFreeGb: number | null
+  k6Version: string | null
+  k6Path: string | null
+  pythonVersion: string | null
+  uvVersion: string | null
+  projectDir: string | null
+  resultsDir: string | null
+  dataDir: string | null
+  status: 'idle' | 'running'
+  runningRunId: string | null
+}
+/** PUT 只能改这两项 */
+export interface ExecutorInput {
+  name: string
+  note: string
+}
+
+// ---------- 被测环境 ----------
+
+/** 被测环境的类型：开发 / 测试 / 预发 / 生产 */
+export type EnvType = 'dev' | 'test' | 'staging' | 'prod'
 
 export interface EnvironmentInput {
   name: string
+  type: EnvType
   baseUrl: string
   headers: Record<string, string>
-  maxVus: number
+  // 安全上限：保护被测环境的护栏，不是负载配置。null 表示不限制；type 为 prod 时三项必填
+  maxVus: number | null
   /** 每秒迭代数 */
-  maxRate: number
-  maxDurationSec: number
+  maxRate: number | null
+  maxDurationSec: number | null
   note: string
 }
 export type Environment = EnvironmentInput & Stamped
@@ -173,6 +211,10 @@ export interface RunListItem {
   profileName: string
   envId: number | null
   envName: string
+  /** 发起时被测环境的类型。旧的运行记录没有这个字段 */
+  envType?: EnvType | null
+  executorId?: number | null
+  executorName?: string | null
   status: RunStatus
   verdict: Verdict | null
   startedAt: string
@@ -199,6 +241,10 @@ export interface RunStartInput {
   testId: number
   profileId: number
   envId: number
+  /** 可省略，默认用本机执行机 */
+  executorId?: number
+  /** 被测环境类型为 prod 时必须为 true，否则预检不通过 */
+  confirmProd?: boolean
   note: string
 }
 
@@ -251,7 +297,7 @@ export interface Plan {
   schemaVersion: number
   runId: string
   test: { id: number; name: string }
-  env: { id: number; name: string; baseUrl: string; headers: Record<string, string> }
+  env: { id: number; name: string; type?: EnvType; baseUrl: string; headers: Record<string, string> }
   profile: { id: number; name: string; type: ProfileType; model: LoadModel; config: ProfileConfig }
   flows: PlanFlow[]
   slo: Slo
@@ -328,7 +374,22 @@ export interface RunRecord {
   fingerprint?: { k6Version: string; pythonVersion: string; gitSha: string; host: string }
   test?: { id: number; name: string }
   profile?: { id: number; name: string; model: LoadModel }
-  env?: { id: number; name: string; baseUrl: string }
+  env?: { id: number; name: string; type?: EnvType; baseUrl: string }
+  /** 运行期间对执行机的采样。只作为信息展示，不参与判定。旧的运行记录没有 */
+  executor?: RecordExecutor | null
+}
+
+export interface RecordExecutor {
+  id: number
+  name: string
+  host: string | null
+  cpuCores: number | null
+  memTotalMb: number | null
+  /** 没有采到样本时三个百分比为 null、samples 为 0 */
+  cpuAvgPct: number | null
+  cpuMaxPct: number | null
+  memMaxPct: number | null
+  samples: number
 }
 
 // ---------- 其他（契约 §3.3） ----------
@@ -343,6 +404,8 @@ export interface SystemInfo {
 
 export interface Overview {
   counts: {
+    /** 契约 §3.4 的示例里没有这一项；没有时前端自己数 */
+    executors?: number
     environments: number
     apis: number
     flows: number

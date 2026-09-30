@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Connection,
+  Cpu,
   DataLine,
   Link,
   List,
@@ -17,7 +18,9 @@ const activeMenu = computed(() => (typeof route.meta.menu === 'string' ? route.m
 
 const menu = [
   { index: '/', label: '概览', icon: Odometer },
-  { index: '/environments', label: '环境', icon: Monitor },
+  // 执行机和被测环境相邻：一个是发起压测的机器，一个是被压的系统
+  { index: '/executors', label: '执行机', icon: Cpu },
+  { index: '/environments', label: '被测环境', icon: Monitor },
   { index: '/apis', label: '接口', icon: Link },
   { index: '/flows', label: '业务流程', icon: Connection },
   { index: '/profiles', label: '负载配置', icon: DataLine },

@@ -16,6 +16,7 @@ def seed() -> None:
 
         add(ENVIRONMENTS, {
             "name": "百度（仅冒烟）",
+            "type": "prod",
             "baseUrl": "https://www.baidu.com",
             "headers": _BAIDU_HEADERS,
             "maxVus": 2, "maxRate": 2, "maxDurationSec": 60,

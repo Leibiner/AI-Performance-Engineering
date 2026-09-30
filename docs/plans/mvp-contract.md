@@ -159,7 +159,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 | 方法与路径 | 说明 |
 |---|---|
-| `POST /api/runs` | 发起运行。body：`{ "testId": 1, "profileId": 1, "envId": 1, "executorId": 1, "confirmProd": false, "note": "" }`。`executorId` 可省略，默认用本机执行机。被测环境类型为 `prod` 时必须带 `"confirmProd": true`，否则预检不通过。成功返回 201 和运行对象（`status: "running"`） |
+| `POST /api/runs` | 发起运行。body：`{ "testId": 1, "profileId": 1, "envId": 1, "executorId": 1, "confirmProd": false, "note": "" }`。`executorId` 可省略，默认用本机执行机。被测环境类型为 `prod` 时必须带 `"confirmProd": true`（只有布尔值 `true` 算确认；不是布尔值返回 400），否则预检不通过。成功返回 201 和运行对象（`status: "running"`） |
 | `GET /api/runs?testId=&verdict=&status=&archived=&page=1&pageSize=20` | 列表，按开始时间倒序。返回 `{ "items": [...], "total": 123 }`，列表项不含 `snapshot` 和 `record` |
 | `GET /api/runs/:runId` | 详情，含 `snapshot`、`record`、`artifacts` |
 | `POST /api/runs/:runId/stop` | 停止正在进行的运行（向 k6 发 SIGINT）。不在运行中返回 409 |
@@ -221,7 +221,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 |---|---|
 | `GET /api/executors` | 返回数组（目前恒为 1 项） |
 | `GET /api/executors/:id` | 单个 |
-| `PUT /api/executors/:id` | 只能改 `name` 和 `note` |
+| `PUT /api/executors/:id` | 只能改 `name` 和 `note`：没给的那项保持原值，其余字段忽略（前端把整个对象原样送回也可以） |
 
 ```json
 {
@@ -233,12 +233,14 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   "k6Version": "v2.3.0", "k6Path": "/abs/.tools/bin/k6",
   "pythonVersion": "3.12.2", "uvVersion": "0.11.18",
   "projectDir": "/abs/仓库根目录", "resultsDir": "/abs/results", "dataDir": "/abs/data",
-  "status": "idle", "runningRunId": null
+  "status": "idle", "runningRunId": null,
+  "createdAt": "2026-09-30T06:00:00.000Z", "updatedAt": "2026-09-30T06:00:00.000Z"
 }
 ```
 
 - `name`、`note` 存库，可修改；其余字段每次请求时实时采集，取不到的给 `null`
 - `status`：`idle | running`
+- 内存和磁盘按 1024 进制换算（MiB、GiB）
 
 **运行期间的执行机采样**：运行期间后端每秒采样一次本机 CPU 和内存占用，结束时写进最终 Run Record：
 
@@ -249,14 +251,19 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 }
 ```
 
-没有采到样本时三个百分比为 `null`、`samples` 为 0。目前只作为信息展示，**不参与判定**。plan.json 的 `env` 和最终 Run Record 的 `env` 都增加 `type` 字段。
+- CPU 占用是整机所有核合计的百分比；采样间隔 1 秒，所以不到 1 秒的运行没有样本
+- 没有采到样本时三个百分比为 `null`、`samples` 为 0
+- 目前只作为信息展示，**不参与判定**
+- plan.json 的 `env` 和最终 Run Record 的 `env` 都带 `type` 字段
+
+**旧运行**：加入执行机和环境类型之前的运行，库里的 `envType`、`executorId`、`executorName` 在迁移时已经补上，但它们的 `snapshot.env`、`record.env` 没有 `type`，`record` 里也没有 `executor`（存档不回改）。前端读这几处时要容忍不存在。
 
 ### 3.4 其他
 
 | 方法与路径 | 返回 |
 |---|---|
 | `GET /api/system` | `{ "k6Version": "v2.3.0", "pythonVersion": "3.12.2", "dashboardPort": 5665, "runningRunId": null }`（`dashboardPort` 仅供排查，前端不使用） |
-| `GET /api/overview` | `{ "counts": { "environments": 1, "apis": 1, "flows": 1, "profiles": 3, "tests": 1, "runs": 12 }, "verdicts": { "passed": 8, "failed": 2, "invalid": 1, "error": 0, "aborted": 1 }, "recentRuns": [运行列表项 × 最近 10 条], "runningRunId": null }` |
+| `GET /api/overview` | `{ "counts": { "environments": 1, "apis": 1, "flows": 1, "profiles": 3, "tests": 1, "executors": 1, "runs": 12 }, "verdicts": { "passed": 8, "failed": 2, "invalid": 1, "error": 0, "aborted": 1 }, "recentRuns": [运行列表项 × 最近 10 条], "runningRunId": null }` |
 
 ## 4. plan.json（后端 → k6）
 
@@ -267,7 +274,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   "schemaVersion": 1,
   "runId": "20260930T101500Z-a1b2c3",
   "test": { "id": 1, "name": "百度首页冒烟" },
-  "env": { "id": 1, "name": "百度（仅冒烟）", "baseUrl": "https://www.baidu.com", "headers": { "User-Agent": "Mozilla/5.0 k6-mvp" } },
+  "env": { "id": 1, "name": "百度（仅冒烟）", "type": "prod", "baseUrl": "https://www.baidu.com", "headers": { "User-Agent": "Mozilla/5.0 k6-mvp" } },
   "profile": { "id": 1, "name": "冒烟", "type": "smoke", "model": "closed", "config": { "vus": 1, "iterations": 10, "maxDurationSec": 30 } },
   "flows": [
     {
@@ -362,9 +369,12 @@ k6 退出后，后端读取 `run-record.json`，补上以下字段，回写文�
   "fingerprint": { "k6Version": "v2.3.0", "pythonVersion": "3.12.2", "gitSha": "a6a37ee", "host": "主机名" },
   "test": { "id": 1, "name": "百度首页冒烟" },
   "profile": { "id": 1, "name": "冒烟", "model": "closed" },
-  "env": { "id": 1, "name": "百度（仅冒烟）", "baseUrl": "https://www.baidu.com" }
+  "env": { "id": 1, "name": "百度（仅冒烟）", "type": "prod", "baseUrl": "https://www.baidu.com" },
+  "executor": { "id": 1, "name": "本机执行机", "host": "主机名", "cpuCores": 4, "memTotalMb": 15900, "cpuAvgPct": 12.3, "cpuMaxPct": 41.0, "memMaxPct": 55.2, "samples": 9 }
 }
 ```
+
+`executor` 的含义见 §3.3。
 
 最终 `verdict` 的判定顺序：
 

@@ -4,9 +4,14 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 const routes: RouteRecordRaw[] = [
   { path: '/', component: () => import('./views/OverviewPage.vue'), meta: { title: '概览', menu: '/' } },
   {
+    path: '/executors',
+    component: () => import('./views/ExecutorsPage.vue'),
+    meta: { title: '执行机', menu: '/executors' },
+  },
+  {
     path: '/environments',
     component: () => import('./views/EnvironmentsPage.vue'),
-    meta: { title: '环境', menu: '/environments' },
+    meta: { title: '被测环境', menu: '/environments' },
   },
   { path: '/apis', component: () => import('./views/ApisPage.vue'), meta: { title: '接口', menu: '/apis' } },
   { path: '/flows', component: () => import('./views/FlowsPage.vue'), meta: { title: '业务流程', menu: '/flows' } },

@@ -7,6 +7,7 @@ import { runsApi, testsApi, type RunListItem, type RunStatus, type TestDef, type
 import { confirmAction, showError } from '../utils/feedback'
 import { formatCount, formatMs, formatPercent, formatTime } from '../utils/format'
 import { VERDICT_OPTIONS } from '../utils/verdict'
+import EnvTypeTag from '../components/EnvTypeTag.vue'
 import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
 import VerdictTag from '../components/VerdictTag.vue'
@@ -152,8 +153,12 @@ onBeforeUnmount(() => {
           </template>
         </el-table-column>
         <el-table-column prop="testName" label="测试" min-width="110" show-overflow-tooltip />
-        <el-table-column prop="profileName" label="负载配置" min-width="80" show-overflow-tooltip />
-        <el-table-column prop="envName" label="环境" min-width="90" show-overflow-tooltip />
+        <el-table-column prop="profileName" label="负载配置" min-width="70" show-overflow-tooltip />
+        <el-table-column label="被测环境" min-width="140" show-overflow-tooltip>
+          <template #default="{ row }">
+            <EnvTypeTag :type="row.envType" class="env-tag" />{{ row.envName }}
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="78">
           <template #default="{ row }"><StatusTag :status="row.status" /></template>
         </el-table-column>
@@ -175,7 +180,7 @@ onBeforeUnmount(() => {
             <span class="num">{{ formatCount(row.summary?.reqs) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="备注" min-width="80" show-overflow-tooltip>
+        <el-table-column label="备注" min-width="60" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag v-if="row.archived" type="warning" effect="plain" size="small" class="archived-tag">已存档</el-tag>
             {{ row.note }}
@@ -238,7 +243,8 @@ onBeforeUnmount(() => {
 .run-link:hover {
   text-decoration: underline;
 }
-.archived-tag {
+.archived-tag,
+.env-tag {
   margin-right: 6px;
 }
 .tooltip-anchor {

@@ -247,3 +247,31 @@ body {
   font-size: 12px;
   line-height: 1.4;
 }
+
+/* 对生产环境发起压测前的二次确认 */
+.prod-confirm-lead {
+  margin: 0 0 10px;
+  color: var(--el-color-danger);
+  font-size: 15px;
+  font-weight: 600;
+}
+.prod-confirm dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 0 0 10px;
+}
+.prod-confirm dt {
+  color: var(--ink-muted);
+}
+.prod-confirm dd {
+  margin: 0;
+  font-weight: 600;
+  word-break: break-all;
+}
+.prod-confirm p:last-child {
+  margin: 0;
+  color: var(--el-text-color-regular);
+  font-size: 13px;
+  line-height: 1.6;
+}

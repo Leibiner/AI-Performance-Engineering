@@ -7,7 +7,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **MVP 已完成并可运行**（2026-09-30）：一个以 k6 为执行引擎的性能测试管理控制台。在页面上维护接口、业务流程、负载配置、验收标准、环境，从页面发起和停止压测，查看判定和指标，结果自动存档。
 
 - 已实现和未实现的能力以 `docs/ARCHITECTURE.md` §1.1 状态表为准；MVP 相对 Phase 0 原设计的出入见 §1.2。
-- 契约（`docs/plans/mvp-contract.md`）目前比已提交的代码新：执行机、被测环境类型、生产环境二次确认、执行机采样已写进契约，实现还没有完成，清单见 `ARCHITECTURE.md` §1.3。实现并验证后更新相关章节并删除 §1.3。
 - 基线对比、趋势、CI、Prometheus / Grafana、Trace、Evidence Bundle、分布式、任何 AI 功能都**还没有实现**，不要当成已有能力来用或引用。
 - 不要主动开始下一个阶段的实现；不要提前创建空目录（规划中的目录见 `ARCHITECTURE.md` §5.2 末尾的表）。
 
@@ -58,7 +57,7 @@ K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --por
 |---|---|---|
 | `perf/` | k6 执行引擎：通用脚本读取 `plan.json` 解释执行；`core/` 生成 scenarios、阈值、Run Record | `perf/runner.js` |
 | `server/` | 后端：Python 3.12 + FastAPI + 标准库 `sqlite3`。增删改查、预检、启动和停止 k6、最终判定、存档、托管前端 | `server/main.py` |
-| `web/` | 前端：Vue 3 + TypeScript + Vite + Element Plus + ECharts，8 个页面 | `web/src/router.ts` |
+| `web/` | 前端：Vue 3 + TypeScript + Vite + Element Plus + ECharts，9 个页面 | `web/src/router.ts` |
 
 一次运行的路径：页面 `POST /api/runs` → 后端预检 → 把测试、流程、接口、负载配置、环境展开成 `results/<runId>/plan.json`（同时作为快照存库）→ 启动 k6 子进程 → `handleSummary` 写 `run-record.json` → 后端按退出码和 `k6Verdict` 得出最终判定，补全 Run Record 后存库。完整的数据流见 `ARCHITECTURE.md` §3.4。
 
@@ -68,12 +67,15 @@ K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --por
 - 前端页面只通过 `web/src/api/` 访问后端，不直接写 fetch。
 - 业务流程是数据，不是代码：新增流程不加文件。`runner.js` 只导出一个执行函数 `runFlow`，用 scenario 名找回对应的流程。
 - 数据在 `data/app.db`（SQLite 单文件）。种子数据在 `server/seed.py`，只在全新的库里写一次；改了种子要删库才会生效。
+- **改表结构要写迁移，不能删库**：库里有用户的真实数据。表结构版本记在 `PRAGMA user_version`，在 `server/db.py` 里把 `SCHEMA_VERSION` 加 1 并加一段迁移（备份 → 一个事务内迁移 → 写版本号），先在库的拷贝上验证，再重启正式服务。
+- **两种"环境"不要混用**：**执行机**（`executors`）是安装了本项目、实际运行 k6 的机器，目前只有本机一台，不能新增和删除；**被测环境**（`environments`）是被压测的目标，有类型 `dev / test / staging / prod`。被测环境上的 `maxVus`、`maxRate`、`maxDurationSec` 是**安全上限**（只在预检时用来拒绝超限的运行），不是负载配置。
 
 ## 必须遵守的约束
 
 **对百度只允许冒烟流量。** MVP 的压测目标 `https://www.baidu.com` 是第三方线上站点：
 
-- 种子环境"百度（仅冒烟）"的上限是 2 并发、每秒 2 次、60 秒，由后端预检强制执行。**不得调高这个环境的上限**，也不要为了"演示压力测试"新建一个指向第三方站点的宽松环境。
+- 种子环境"百度（仅冒烟）"的类型是生产（`prod`），安全上限是 2 并发、每秒 2 次、60 秒，由后端预检强制执行。**不得调高这个环境的上限，也不得把它改成非生产类型**（非生产类型可以不设上限），也不要为了"演示压力测试"新建一个指向第三方站点的宽松环境。
+- 被测环境是生产时，`POST /api/runs` 必须带 `"confirmProd": true`；页面上是一次必须点的确认。
 - 手动运行 k6 时同样遵守：最多 2 个并发，单次不超过 20 次迭代或 15 秒。
 - 不要绕过后端预检直接对外加压。验证后端逻辑用假 k6，检查 plan 用 `k6 inspect`。
 - 百度的 `/s` 会 302 到验证码页，不要用作示例；首页 `/` 可用。
@@ -85,6 +87,8 @@ K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --por
 **业务与负载分开。** 接口和流程的数据模型里不能出现并发、到达率、时长；负载配置里不能出现地址和业务逻辑；它们只在后端组装 plan 时相遇。负载配置必须显式声明 `model: open | closed`。"Scenario" 只指 k6 Scenario，它是 `compose.js` 的编译产物，不手写、不在页面上维护。
 
 **`perf/core/` 不认识任何具体的被测系统**，只依赖 k6 内置模块，不 import `k6/x/*` 或 `k6/experimental/*`。`testid` tag 只在后端启动 k6 时设置一次。ID 类数据和页面上的中文名称不进 tag。
+
+**执行机采样只展示，不参与判定。** 运行期间后端每秒采样本机 CPU 和内存，写进 Run Record 的 `executor`。是否在执行机过载时判 `invalid`、阈值多少，未决，不要自行加进判定。
 
 **同一时间只允许 1 个运行；后端只能单进程。** 正在运行的 k6 进程句柄在内存里。向 k6 发信号只能发一次 SIGINT：第二次会让它强制退出且不写 summary。
 
@@ -133,7 +137,9 @@ docs/research/         L3 研究记录与来源；只作为依据，不随实现
 动到相关设计前先向用户确认：
 
 - **自有目标系统**：百度只能冒烟，不能产生性能结论。需要一个可以自由加压的目标（本机没有 Docker 和 sudo，QuickPizza 没有采用）。
-- **登录与权限**：现在没有，服务监听 `0.0.0.0`，环境上限可以在页面上修改。多人使用或暴露到不可信网络之前必须先做（ADR-005）。
+- **登录与权限**：现在没有，服务监听 `0.0.0.0`，被测环境的类型和安全上限可以在页面上修改。多人使用或暴露到不可信网络之前必须先做（ADR-005）。
+- **目标地址白名单**：非生产类型的被测环境可以不设上限，而任何合法地址都能建成被测环境。要不要限制"只有白名单里的域名才允许不设上限"。
+- **执行机过载是否判 `invalid`**：现在只展示采样结果。
 - **CI 的入口和平台**：没有命令行入口。是让 CI 调用后端接口，还是"plan 文件 + 命令行"（`ARCHITECTURE.md` §3.8）；平台未定。
 - **基线、历史、实验记录的存储形态**：放数据库，还是放 git 以保留审核（`ARCHITECTURE.md` §3.7）。
 - **流程的表达力**：需要分支、循环、轮询或数据集时，是扩展数据模型，还是引入手写 JS 模块作为第二种流程类型（ADR-005）。

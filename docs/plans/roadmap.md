@@ -15,7 +15,7 @@
 |---|---|
 | 执行引擎 `perf/` | 通用 k6 脚本 `runner.js` 读取 plan 解释执行；`core/` 生成 scenarios、阈值（SLO + 有效性）、Run Record |
 | 后端 `server/` | Python 3.12 + FastAPI + SQLite：5 类定义的增删改查、预检、启动和停止 k6、最终判定、存档、托管前端 |
-| 前端 `web/` | Vue 3 + Element Plus，8 个页面：概览、环境、接口、业务流程、负载配置、测试、运行列表、运行详情 |
+| 前端 `web/` | Vue 3 + Element Plus，9 个页面：概览、执行机、被测环境、接口、业务流程、负载配置、测试、运行列表、运行详情 |
 | 目标 | `https://www.baidu.com`，只允许冒烟级别流量（环境上限 2 并发、每秒 2 次、60 秒，预检强制执行） |
 
 **与原 Phase 1 的对应**（编号是下文 Phase 1 范围里的序号）：
@@ -29,8 +29,8 @@
 | 6) 业务指标、tag 词汇表 | tag（`testid`、`flow`、`step`、`name`）✅；业务指标 ❌ |
 | 7) Run 入口 | **做法改变**：入口是后端接口 `POST /api/runs`，没有 Node 命令行。runId、环境指纹、`testid` tag ✅ |
 | 8) Run Record + Verdict | ✅ 五种判定，`invalid` 优先于 `failed` |
-| 9) 预检、最大时长、手动中止 | ✅ 预检（含环境流量上限）、手动停止；目标白名单和健康检查 ❌ |
-| 10) 监控 | `dashboard.html` 导出 ✅；运行中的进度来自 k6 日志（浏览器连实时仪表盘会阻止 k6 退出）；负载机采样 ❌ |
+| 9) 预检、最大时长、手动中止 | ✅ 预检（含被测环境的安全上限、生产环境二次确认）、手动停止；目标白名单和健康检查 ❌ |
+| 10) 监控 | `dashboard.html` 导出 ✅；运行中的进度来自 k6 日志（浏览器连实时仪表盘会阻止 k6 退出）；执行机（负载机）CPU / 内存采样 ✅，只展示、不参与判定 |
 | 11) 静态报告、`schemas/` | **取消**：由运行详情页替代；三方接口以 `plans/mvp-contract.md` 为约定，没有 JSON Schema 文件 |
 | 12) README | ✅ |
 | 13) Pain Point Log | ❌ 还没有开始记录 |
@@ -121,7 +121,7 @@ flowchart LR
 2. 在它上面验证含登录的多步骤流程，以及 average / stress 级别的负载和 `invalid` 判定；
 3. 按流程 / 步骤设置 SLO；业务指标；
 4. Data 规则：数据集、账户池、唯一键、跨迭代的 token 复用（现在的数据模型表达不了，见 ADR-005 复议条件）；
-5. 负载机采样、目标健康检查、`X-Load-Test-Run` 请求头；
+5. 目标健康检查、`X-Load-Test-Run` 请求头；执行机采样已有，是否在过载时判 `invalid` 待定；
 6. 开始记录 `journal/pain-points.md`。
 
 ---
