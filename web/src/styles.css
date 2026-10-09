@@ -276,19 +276,6 @@ body {
   line-height: 1.6;
 }
 
-/* 接口页“新建”下拉顶部的目标位置 */
-.new-menu-target {
-  padding: 6px 16px 8px;
-  border-bottom: 1px solid var(--hairline);
-  color: var(--ink-muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-.new-menu-target strong {
-  color: var(--el-text-color-primary);
-  font-weight: 600;
-}
-
 /* "复制为 cURL" 无法写剪贴板时，在对话框里显示命令 */
 .curl-text {
   max-height: 360px;

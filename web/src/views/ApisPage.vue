@@ -18,8 +18,6 @@ const { items, loading, load, remove } = useResourceList(apisApi, '接口')
 
 // ---------- 文件夹 ----------
 const folders = ref<Folder[]>([])
-/** 树里当前所在的文件夹：新建接口 / 文件夹时的默认位置。null = 根目录 */
-const currentFolderId = ref<number | null>(null)
 async function loadFolders(): Promise<void> {
   try {
     folders.value = await foldersApi.list()
@@ -50,9 +48,8 @@ async function createFolder(parentId: number | null): Promise<void> {
   const name = await promptName(where)
   if (!name) return
   try {
-    const created = await foldersApi.create({ name, parentId, note: '' })
+    await foldersApi.create({ name, parentId, note: '' })
     await loadFolders()
-    currentFolderId.value = created.id
     ElMessage.success(`已新建文件夹「${name}」`)
   } catch (e) {
     showError(e, '新建文件夹失败')
@@ -74,14 +71,10 @@ async function deleteFolder(folder: Folder): Promise<void> {
   try {
     await foldersApi.remove(folder.id)
     await loadFolders()
-    if (currentFolderId.value === folder.id) currentFolderId.value = folder.parentId
     ElMessage.success('已删除')
   } catch (e) {
     showError(e, '删除失败')
   }
-}
-function selectFolder(folderId: number | null): void {
-  currentFolderId.value = folderId
 }
 
 const selectedId = ref<number | null>(null)
@@ -106,7 +99,6 @@ function open(api: ApiDef): void {
   selectedId.value = api.id
   form.value = fromApi(api)
   baseline.value = snapshot(form.value)
-  currentFolderId.value = api.folderId ?? null
 }
 
 async function guard(): Promise<boolean> {
@@ -125,7 +117,6 @@ async function create(folderId: number | null): Promise<void> {
   selectedId.value = null
   form.value = emptyForm(folderId)
   baseline.value = snapshot(form.value)
-  currentFolderId.value = folderId
 }
 
 async function duplicate(): Promise<void> {
@@ -203,10 +194,8 @@ async function del(): Promise<void> {
         :folders="folders"
         :selected-id="selectedId"
         :draft-folder-id="draftFolderId"
-        :current-folder-id="currentFolderId"
         :loading="loading"
         @select="select"
-        @select-folder="selectFolder"
         @create="create"
         @import="openImport"
         @create-folder="createFolder"

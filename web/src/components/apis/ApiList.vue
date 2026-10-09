@@ -3,12 +3,11 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { ArrowDown, Folder as FolderIcon, FolderOpened, MoreFilled, Plus, Search } from '@element-plus/icons-vue'
 import type { ElTree } from 'element-plus'
 import type { ApiDef, Folder } from '../../api'
-import { buildFolderTree, folderPath, type FolderNode } from '../../utils/folders'
+import { buildFolderTree, type FolderNode } from '../../utils/folders'
 import { METHOD_COLOR } from '../../utils/method'
 
 // 接口页左栏：文件夹树 + 接口叶子，像 Postman 的集合树。文件夹可嵌套（项目 → 模块），非空不能删。
-// 顶部"新建"下拉：接口和 cURL 导入建到当前选中的文件夹；新建文件夹永远是顶层的独立文件夹。
-// 子文件夹只从那个文件夹的 … 菜单里建，层级关系一眼可见。
+// 规则只有一条：顶部"新建"建在根目录（接口、cURL 导入、文件夹）；要建在某个文件夹里，用那个文件夹的 … 菜单。
 interface TreeItem {
   key: string
   kind: 'folder' | 'api' | 'draft'
@@ -26,12 +25,10 @@ const props = defineProps<{
   selectedId: number | null
   /** undefined = 没有在新建；null = 新建在根目录；数字 = 新建在该文件夹下 */
   draftFolderId: number | null | undefined
-  currentFolderId: number | null
   loading: boolean
 }>()
 const emit = defineEmits<{
   select: [api: ApiDef]
-  'select-folder': [folderId: number | null]
   create: [folderId: number | null]
   import: [folderId: number | null]
   'create-folder': [parentId: number | null]
@@ -116,22 +113,18 @@ function onNodeClick(item: TreeItem): void {
   if (item.kind === 'api' && item.api) {
     activeKey.value = item.key
     emit('select', item.api)
-  } else if (item.kind === 'folder' && item.folder) {
-    activeKey.value = item.key
-    emit('select-folder', item.folder.id)
   }
   applyCurrent()
 }
 function onFolderCommand(command: string, folder: Folder): void {
-  if (command === 'subfolder') emit('create-folder', folder.id)
+  if (command === 'api') emit('create', folder.id)
+  else if (command === 'subfolder') emit('create-folder', folder.id)
   else if (command === 'rename') emit('rename-folder', folder)
   else if (command === 'delete') emit('delete-folder', folder)
 }
-/** "新建"下拉里显示的目标位置 */
-const targetLabel = computed(() => folderPath(props.folders, props.currentFolderId) || '根目录')
 function onNewCommand(command: string): void {
-  if (command === 'api') emit('create', props.currentFolderId)
-  else if (command === 'import') emit('import', props.currentFolderId)
+  if (command === 'api') emit('create', null)
+  else if (command === 'import') emit('import', null)
   else if (command === 'folder') emit('create-folder', null)
 }
 
@@ -154,10 +147,9 @@ function filterNode(value: string, item: Record<string, unknown>): boolean {
         </el-button>
         <template #dropdown>
           <el-dropdown-menu class="new-menu">
-            <div class="new-menu-target">接口建到：<strong>{{ targetLabel }}</strong></div>
             <el-dropdown-item command="api">新建接口</el-dropdown-item>
             <el-dropdown-item command="import">从 cURL 导入接口</el-dropdown-item>
-            <el-dropdown-item divided command="folder">新建文件夹（顶层）</el-dropdown-item>
+            <el-dropdown-item divided command="folder">新建文件夹</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -192,6 +184,7 @@ function filterNode(value: string, item: Record<string, unknown>): boolean {
                 </span>
                 <template #dropdown>
                   <el-dropdown-menu>
+                    <el-dropdown-item command="api">新建接口</el-dropdown-item>
                     <el-dropdown-item command="subfolder">新建子文件夹</el-dropdown-item>
                     <el-dropdown-item divided command="rename">重命名</el-dropdown-item>
                     <el-dropdown-item command="delete">删除</el-dropdown-item>
