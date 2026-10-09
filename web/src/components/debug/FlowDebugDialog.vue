@@ -8,7 +8,7 @@ import { STEP_STATUS } from '../../utils/debug'
 import { formatMs } from '../../utils/format'
 import DebugErrorView from './DebugErrorView.vue'
 import DebugStepPanel from './DebugStepPanel.vue'
-import DebugVarsEditor from './DebugVarsEditor.vue'
+import VariablesTable from './VariablesTable.vue'
 import EnvPicker from './EnvPicker.vue'
 
 const visible = defineModel<boolean>({ required: true })
@@ -35,7 +35,7 @@ async function start(): Promise<void> {
   const r = await run({
     envId: env.id,
     ...(env.type === 'prod' ? { confirmProd: true } : {}),
-    vars: ctx.vars.value,
+    vars: ctx.overrides.value,
     flowId: props.flow.id,
   })
   updatedVars.value = r ? ctx.applyExtracted(r) : []
@@ -52,14 +52,14 @@ async function start(): Promise<void> {
     <div class="flow-debug-bar">
       <span class="muted">发往</span>
       <EnvPicker />
-      <el-popover placement="bottom-start" :width="560" trigger="click">
+      <el-popover v-if="ctx.environment.value" placement="bottom-start" :width="860" trigger="click">
         <template #reference>
           <el-button text bg>
             变量
             <span v-if="ctx.varCount.value" class="flow-debug-count">{{ ctx.varCount.value }}</span>
           </el-button>
         </template>
-        <DebugVarsEditor />
+        <VariablesTable :env-id="ctx.environment.value.id" :initial="ctx.initialVars.value" />
       </el-popover>
       <span class="flow-debug-spacer" />
       <el-tooltip :content="ctx.blocker.value ?? ''" :disabled="!ctx.blocker.value" placement="top">

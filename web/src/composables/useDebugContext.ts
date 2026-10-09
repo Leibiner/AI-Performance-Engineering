@@ -2,10 +2,14 @@ import { computed, h, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { environmentsApi, type DebugResult, type Environment } from '../api'
 import { showError } from '../utils/feedback'
-import { fromRows, toRows, type KvRow } from '../utils/kv'
 
 const STORAGE_KEY = 'perf-console.debugEnvId'
-const VARS_KEY = 'perf-console.debugVars'
+/** 环境 id → { 变量名: 当前值 }。只存和初始值不同的；没有的就用初始值 */
+const CURRENT_KEY = 'perf-console.debugCurrent'
+/** 旧格式：环境 id → 完整的行（第一次用环境时从初始值复制而来） */
+const LEGACY_KEY = 'perf-console.debugVars'
+
+type Values = Record<string, string>
 
 function readStoredEnvId(): number | undefined {
   try {
@@ -17,9 +21,9 @@ function readStoredEnvId(): number | undefined {
   }
 }
 
-function readStoredVars(): Record<string, KvRow[]> {
+function readJson(key: string): Record<string, unknown> {
   try {
-    const raw = window.localStorage.getItem(VARS_KEY)
+    const raw = window.localStorage.getItem(key)
     const data = raw ? JSON.parse(raw) : {}
     return data && typeof data === 'object' ? data : {}
   } catch {
@@ -36,13 +40,12 @@ watch(envId, (value) => {
     // 隐私模式等情况下写不了，忽略
   }
 })
-/** 环境 id → 当前值 */
-const currentByEnv = ref<Record<string, KvRow[]>>(readStoredVars())
+const currentByEnv = ref<Record<string, Values>>(readJson(CURRENT_KEY) as Record<string, Values>)
 watch(
   currentByEnv,
   (value) => {
     try {
-      window.localStorage.setItem(VARS_KEY, JSON.stringify(value))
+      window.localStorage.setItem(CURRENT_KEY, JSON.stringify(value))
     } catch {
       // 写不了就只在本次会话里有效
     }
@@ -56,53 +59,77 @@ const confirmedProd = ref<Set<number>>(new Set())
 
 export function useDebugContext() {
   const environment = computed(() => environments.value.find((e) => e.id === envId.value) ?? null)
-  const initialVars = computed<Record<string, string>>(() => environment.value?.variables ?? {})
+  const initialVars = computed<Values>(() => environment.value?.variables ?? {})
 
-  /** 当前环境的变量当前值；第一次用这个环境时从初始值复制 */
-  const varRows = computed<KvRow[]>({
-    get: () => {
-      const env = environment.value
-      if (!env) return []
-      return currentByEnv.value[String(env.id)] ?? toRows(env.variables ?? {})
-    },
-    set: (rows) => {
-      const env = environment.value
-      if (env) currentByEnv.value = { ...currentByEnv.value, [String(env.id)]: rows }
-    },
-  })
-  const vars = computed(() => fromRows(varRows.value))
-  const varCount = computed(() => varRows.value.filter((r) => r.key.trim() !== '').length)
-
-  function resetVars(): void {
-    varRows.value = toRows(initialVars.value)
+  function currentOf(id: number): Values {
+    return currentByEnv.value[String(id)] ?? {}
+  }
+  function writeCurrent(id: number, values: Values): void {
+    const next = { ...currentByEnv.value }
+    if (Object.keys(values).length) next[String(id)] = values
+    else delete next[String(id)]
+    currentByEnv.value = next
+  }
+  /** 设置某个环境里一个变量的当前值 */
+  function setCurrent(id: number, name: string, value: string): void {
+    writeCurrent(id, { ...currentOf(id), [name]: value })
+  }
+  /** 清掉当前值，回到初始值（没有初始值就是没有这个变量） */
+  function clearCurrent(id: number, name?: string): void {
+    if (name === undefined) return writeCurrent(id, {})
+    const next = { ...currentOf(id) }
+    delete next[name]
+    writeCurrent(id, next)
   }
 
-  /**
-   * 一次调试结束后，把各步提取到的变量写回当前值（同名覆盖，新的追加在后面）。
-   * 返回写回的变量名，页面用来提示。
-   */
+  /** 当前调试环境里改过的当前值；调试请求只带这些，初始值由后端打底 */
+  const overrides = computed<Values>(() => (environment.value ? currentOf(environment.value.id) : {}))
+  /** 实际生效的变量：初始值 + 当前值 */
+  const vars = computed<Values>(() => ({ ...initialVars.value, ...overrides.value }))
+  const varCount = computed(() => Object.keys(vars.value).length)
+
+  /** 一次调试结束后，把各步提取到的变量写进当前值。返回写入的变量名 */
   function applyExtracted(result: DebugResult): string[] {
-    const updates = new Map<string, string>()
+    const env = environment.value
+    if (!env) return []
+    const updates: Values = {}
     for (const step of result.steps) {
       for (const e of step.extracted) {
-        if (e.ok && e.value !== null) updates.set(e.var, e.value)
+        if (e.ok && e.value !== null) updates[e.var] = e.value
       }
     }
-    if (!updates.size) return []
-    const rows = varRows.value.map((r) => ({ ...r }))
-    for (const [name, value] of updates) {
-      const row = rows.find((r) => r.key.trim() === name)
-      if (row) row.value = value
-      else rows.push({ key: name, value })
+    const names = Object.keys(updates)
+    if (names.length) writeCurrent(env.id, { ...currentOf(env.id), ...updates })
+    return names
+  }
+
+  /** 旧格式里和初始值相同的是"复制来的"，丢掉；不同的才是当前值 */
+  function migrateLegacy(): void {
+    const legacy = readJson(LEGACY_KEY) as Record<string, { key: string; value: string }[]>
+    if (!Object.keys(legacy).length) return
+    for (const env of environments.value) {
+      const rows = legacy[String(env.id)]
+      if (!Array.isArray(rows)) continue
+      const initial = env.variables ?? {}
+      const kept: Values = { ...currentOf(env.id) }
+      for (const r of rows) {
+        const name = (r.key ?? '').trim()
+        if (name && initial[name] !== r.value && !(name in kept)) kept[name] = r.value
+      }
+      writeCurrent(env.id, kept)
     }
-    varRows.value = rows
-    return [...updates.keys()]
+    try {
+      window.localStorage.removeItem(LEGACY_KEY)
+    } catch {
+      // 忽略
+    }
   }
 
   async function loadEnvironments(): Promise<void> {
     try {
       environments.value = await environmentsApi.list()
       loaded.value = true
+      migrateLegacy()
       if (envId.value !== undefined && !environments.value.some((e) => e.id === envId.value)) envId.value = undefined
       if (envId.value === undefined && environments.value.length === 1) envId.value = environments.value[0].id
     } catch (e) {
@@ -143,7 +170,7 @@ export function useDebugContext() {
   }
 
   return {
-    envId, varRows, vars, varCount, initialVars, resetVars, applyExtracted,
+    envId, vars, overrides, varCount, initialVars, currentOf, setCurrent, clearCurrent, applyExtracted,
     environments, environment, loaded, loadEnvironments, blocker, ensureProdConfirmed,
   }
 }

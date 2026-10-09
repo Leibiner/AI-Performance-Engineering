@@ -7,6 +7,7 @@ import { confirmAction, showError } from '../utils/feedback'
 import { emptyForm, fromApi, snapshot, toInput, type ApiForm } from '../utils/api-form'
 import type { CurlImport } from '../utils/curl'
 import { buildFolderTree, folderOptions, folderPath } from '../utils/folders'
+import { useApiIndex } from '../composables/useApiIndex'
 import PageHeader from '../components/PageHeader.vue'
 import ApiList from '../components/apis/ApiList.vue'
 import ApiEditor from '../components/apis/ApiEditor.vue'
@@ -26,12 +27,9 @@ async function loadFolders(): Promise<void> {
 onMounted(loadFolders)
 const folderTree = computed(() => buildFolderTree(folders.value, items.value))
 const folderSelectOptions = computed(() => folderOptions(folderTree.value.roots))
-/** 变量名 → 提取它的接口名，编辑器据此区分"还没发送"和"没人定义" */
-const producers = computed(() => {
-  const out: Record<string, string[]> = {}
-  for (const api of items.value) for (const e of api.extracts ?? []) (out[e.var] ??= []).push(api.name)
-  return out
-})
+const apiIndex = useApiIndex()
+const producers = apiIndex.producers
+watch(items, () => void apiIndex.refresh())
 
 async function promptName(title: string, initial = ''): Promise<string | null> {
   try {

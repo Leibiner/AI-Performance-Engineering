@@ -9,6 +9,7 @@ import { ENV_TYPE_OPTIONS, formatLimit } from '../utils/env'
 import { fromRows, toRows, type KvRow } from '../utils/kv'
 import EnvTypeTag from '../components/EnvTypeTag.vue'
 import KeyValueEditor from '../components/KeyValueEditor.vue'
+import VariablesTable from '../components/debug/VariablesTable.vue'
 import PageHeader from '../components/PageHeader.vue'
 
 const { items, loading, load, remove } = useResourceList(environmentsApi, '被测环境')
@@ -22,7 +23,7 @@ interface FormState {
   type: EnvType | undefined
   baseUrl: string
   headers: KvRow[]
-  variables: KvRow[]
+  variables: Record<string, string>
   // 安全上限：留空表示不限制（生产环境必填）
   maxVus: number | undefined
   maxRate: number | undefined
@@ -36,7 +37,7 @@ function emptyForm(): FormState {
     type: undefined,
     baseUrl: '',
     headers: [],
-    variables: [],
+    variables: {},
     maxVus: undefined,
     maxRate: undefined,
     maxDurationSec: undefined,
@@ -100,7 +101,7 @@ function openEdit(row: Environment): void {
     type: row.type ?? undefined,
     baseUrl: row.baseUrl,
     headers: toRows(row.headers),
-    variables: toRows(row.variables),
+    variables: { ...(row.variables ?? {}) },
     maxVus: row.maxVus ?? undefined,
     maxRate: row.maxRate ?? undefined,
     maxDurationSec: row.maxDurationSec ?? undefined,
@@ -118,7 +119,7 @@ async function save(): Promise<void> {
     // 去掉末尾的斜杠，接口的 path 以 / 开头，直接拼在后面
     baseUrl: form.baseUrl.trim().replace(/\/+$/, ''),
     headers: fromRows(form.headers),
-    variables: fromRows(form.variables),
+    variables: { ...form.variables },
     maxVus: form.maxVus ?? null,
     maxRate: form.maxRate ?? null,
     maxDurationSec: form.maxDurationSec ?? null,
@@ -187,7 +188,7 @@ async function save(): Promise<void> {
     <el-dialog
       v-model="dialogVisible"
       :title="editingId === null ? '新建被测环境' : '编辑被测环境'"
-      width="700px"
+      width="900px"
       top="6vh"
       :close-on-click-modal="false"
       destroy-on-close
@@ -213,12 +214,7 @@ async function save(): Promise<void> {
           />
         </el-form-item>
         <el-form-item label="环境变量">
-          <KeyValueEditor
-            v-model="form.variables"
-            key-placeholder="变量名，如 token、tenantId"
-            value-placeholder="初始值"
-            add-text="添加变量"
-          />
+          <VariablesTable v-model:initial="form.variables" :env-id="editingId" edit-initial />
         </el-form-item>
 
         <fieldset class="limit-group" :class="{ 'is-prod': isProd }">

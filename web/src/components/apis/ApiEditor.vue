@@ -16,7 +16,7 @@ import KeyValueEditor from '../KeyValueEditor.vue'
 import VarInput from '../VarInput.vue'
 import DebugErrorView from '../debug/DebugErrorView.vue'
 import DebugStepPanel from '../debug/DebugStepPanel.vue'
-import DebugVarsEditor from '../debug/DebugVarsEditor.vue'
+import VariablesTable from '../debug/VariablesTable.vue'
 import EnvPicker from '../debug/EnvPicker.vue'
 
 const form = defineModel<ApiForm>({ required: true })
@@ -137,7 +137,7 @@ async function send(): Promise<void> {
   const r = await run({
     envId: env.id,
     ...(env.type === 'prod' ? { confirmProd: true } : {}),
-    vars: ctx.vars.value,
+    vars: ctx.overrides.value,
     api: input,
   })
   updatedVars.value = r ? ctx.applyExtracted(r) : []
@@ -334,7 +334,8 @@ async function copyCurl(): Promise<void> {
 
       <el-tab-pane name="vars">
         <template #label>环境变量<span v-if="ctx.varCount.value" class="tab-count">{{ ctx.varCount.value }}</span></template>
-        <DebugVarsEditor />
+        <VariablesTable v-if="ctx.environment.value" :env-id="ctx.environment.value.id" :initial="ctx.initialVars.value" />
+        <span v-else class="muted">未选择环境</span>
       </el-tab-pane>
     </el-tabs>
 

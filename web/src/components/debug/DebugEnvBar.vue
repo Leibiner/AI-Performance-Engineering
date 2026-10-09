@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { useDebugContext } from '../../composables/useDebugContext'
 import EnvPicker from './EnvPicker.vue'
+import VariablesTable from './VariablesTable.vue'
 
+const ctx = useDebugContext()
 </script>
 
 <template>
@@ -12,6 +15,15 @@ import EnvPicker from './EnvPicker.vue'
       调试环境
     </span>
     <EnvPicker />
+    <el-popover v-if="ctx.environment.value" placement="bottom-end" :width="860" trigger="click">
+      <template #reference>
+        <el-button text bg size="small">
+          变量<span class="debug-env-count">{{ ctx.varCount.value }}</span>
+        </el-button>
+      </template>
+      <div class="debug-env-vars-title">{{ ctx.environment.value.name }}</div>
+      <VariablesTable :env-id="ctx.environment.value.id" :initial="ctx.initialVars.value" />
+    </el-popover>
     <router-link class="debug-env-link" to="/environments">管理</router-link>
   </div>
 </template>
@@ -34,5 +46,13 @@ import EnvPicker from './EnvPicker.vue'
 }
 .debug-env-link:hover {
   text-decoration: underline;
+}
+.debug-env-count {
+  margin-left: 6px;
+  color: var(--ink-muted);
+}
+.debug-env-vars-title {
+  margin-bottom: 6px;
+  font-weight: 600;
 }
 </style>
