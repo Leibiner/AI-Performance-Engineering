@@ -49,7 +49,10 @@ export interface EnvironmentInput {
   name: string
   type: EnvType
   baseUrl: string
+  /** 公共请求头：发往这个环境的每个请求都带，接口的同名请求头覆盖它 */
   headers: Record<string, string>
+  /** 环境变量的初始值：运行和调试开始时的变量。旧数据可能没有 */
+  variables?: Record<string, string>
   // 安全上限：保护被测环境的护栏，不是负载配置。null 表示不限制；type 为 prod 时三项必填
   maxVus: number | null
   /** 每秒迭代数 */

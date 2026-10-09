@@ -58,6 +58,16 @@ function onQueryRows(rows: KvRow[]): void {
 const tab = ref('params')
 const queryCount = computed(() => queryRows.value.filter((r) => r.key.trim() !== '').length)
 const headerCount = computed(() => form.value.headers.filter((r) => r.key.trim() !== '').length)
+
+/** 当前调试环境的公共请求头：只读显示，接口里同名（不区分大小写）的会覆盖它 */
+const inheritedHeaders = computed(() => {
+  const own = new Set(form.value.headers.map((r) => r.key.trim().toLowerCase()).filter(Boolean))
+  return Object.entries(ctx.environment.value?.headers ?? {}).map(([name, value]) => ({
+    name,
+    value,
+    overridden: own.has(name.toLowerCase()),
+  }))
+})
 const extractCount = computed(() => form.value.extracts.filter((e) => e.var.trim() !== '' || e.expr.trim() !== '').length)
 const bodyIsJsonLike = computed(() => /^\s*[[{]/.test(form.value.body))
 
@@ -94,13 +104,16 @@ async function send(): Promise<void> {
   if (!(await ctx.ensureProdConfirmed())) return
   const input = toInput(form.value)
   if (!input.name) input.name = '未命名接口'
-  await run({
+  const r = await run({
     envId: env.id,
     ...(env.type === 'prod' ? { confirmProd: true } : {}),
     vars: ctx.vars.value,
     api: input,
   })
+  updatedVars.value = r ? ctx.applyExtracted(r) : []
 }
+/** 上一次发送后写回当前值的变量名 */
+const updatedVars = ref<string[]>([])
 const step = computed(() => result.value?.steps[0] ?? null)
 
 function onKey(e: KeyboardEvent): void {
@@ -208,14 +221,27 @@ async function copyCurl(): Promise<void> {
       </el-tab-pane>
 
       <el-tab-pane name="headers">
-        <template #label>请求头<span v-if="headerCount" class="tab-count">{{ headerCount }}</span></template>
+        <template #label>
+          请求头<span v-if="headerCount + inheritedHeaders.length" class="tab-count">{{ headerCount + inheritedHeaders.length }}</span>
+        </template>
+        <div v-if="inheritedHeaders.length" class="inherited">
+          <div class="inherited-title">
+            继承自环境「{{ ctx.environment.value?.name }}」<span class="muted">（只读，换环境会跟着变；在被测环境里修改）</span>
+          </div>
+          <div v-for="h in inheritedHeaders" :key="h.name" class="inherited-row" :class="{ 'is-overridden': h.overridden }">
+            <span class="inherited-key">{{ h.name }}</span>
+            <span class="inherited-value mono">{{ h.value }}</span>
+            <span v-if="h.overridden" class="inherited-note">被接口的同名请求头覆盖</span>
+          </div>
+        </div>
+        <div v-if="inheritedHeaders.length" class="inherited-title own-title">接口自己的请求头</div>
         <KeyValueEditor
           v-model="form.headers"
           key-placeholder="请求头名称，如 Authorization"
           value-placeholder="值，可以用 {{变量名}}"
           add-text="添加请求头"
         />
-        <div class="form-hint">被测环境的公共请求头会自动带上；同名时以这里的为准。</div>
+        <div class="form-hint">同名时以接口自己的为准。发送后在响应面板的“实际请求”里能看到合并后的结果。</div>
       </el-tab-pane>
 
       <el-tab-pane name="body">
@@ -264,7 +290,7 @@ async function copyCurl(): Promise<void> {
       </el-tab-pane>
 
       <el-tab-pane name="vars">
-        <template #label>调试变量<span v-if="ctx.varCount.value" class="tab-count">{{ ctx.varCount.value }}</span></template>
+        <template #label>环境变量<span v-if="ctx.varCount.value" class="tab-count">{{ ctx.varCount.value }}</span></template>
         <DebugVarsEditor />
       </el-tab-pane>
     </el-tabs>
@@ -274,6 +300,9 @@ async function copyCurl(): Promise<void> {
         <span class="response-title">响应</span>
         <span v-if="result" class="muted response-meta">
           发往 {{ result.env.name }} · k6 用时 {{ formatMs(result.durationMs) }}（含启动）
+        </span>
+        <span v-if="result && updatedVars.length" class="vars-updated">
+          已更新环境变量当前值：<span class="mono">{{ updatedVars.join('、') }}</span>
         </span>
       </div>
       <div v-if="running" class="response-empty">正在通过 k6 向「{{ ctx.environment.value?.name }}」发送…</div>
@@ -413,6 +442,54 @@ async function copyCurl(): Promise<void> {
   max-width: 640px;
 }
 
+.inherited {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px dashed var(--hairline);
+  border-radius: 6px;
+  background: #fafbfc;
+}
+.inherited-title {
+  margin-bottom: 6px;
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+}
+.own-title {
+  margin-bottom: 8px;
+}
+.inherited-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+.inherited-key {
+  width: 38%;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inherited-value {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+.inherited-row.is-overridden .inherited-key,
+.inherited-row.is-overridden .inherited-value {
+  color: var(--ink-muted);
+  text-decoration: line-through;
+}
+.inherited-note {
+  flex-shrink: 0;
+  color: var(--el-color-warning);
+  font-size: 12px;
+}
+.vars-updated {
+  color: #1f8a3b;
+  font-size: 12px;
+}
 .response {
   padding-top: 14px;
   border-top: 1px solid var(--hairline);

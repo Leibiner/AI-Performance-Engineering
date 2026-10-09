@@ -152,6 +152,7 @@ def _build_plan(debug_id: str, env: dict, steps: list[tuple[dict, Any]], source:
         "env": {
             "id": env["id"], "name": env["name"], "type": env["type"],
             "baseUrl": env["baseUrl"].rstrip("/"), "headers": env["headers"],
+            "variables": env.get("variables") or {},
         },
         "profile": {
             "id": 0, "name": "调试", "type": "smoke", "model": "closed",

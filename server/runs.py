@@ -286,6 +286,7 @@ def _build_plan(run_id: str, test: dict, profile: dict, env: dict, expanded: lis
         "env": {
             "id": env["id"], "name": env["name"], "type": env["type"],
             "baseUrl": env["baseUrl"].rstrip("/"), "headers": env["headers"],
+            "variables": env.get("variables") or {},
         },
         "profile": {
             "id": profile["id"], "name": profile["name"], "type": profile["type"],

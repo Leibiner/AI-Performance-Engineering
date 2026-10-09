@@ -18,6 +18,8 @@ const props = defineProps<{ flow: Flow | null }>()
 const ctx = useDebugContext()
 const { running, result, error, run, reset } = useDebug()
 const opened = ref<string[]>([])
+/** 这次试跑后写回环境变量当前值的变量名 */
+const updatedVars = ref<string[]>([])
 
 watch(visible, (open) => {
   if (open) {
@@ -38,6 +40,7 @@ async function start(): Promise<void> {
     vars: ctx.vars.value,
     flowId: props.flow.id,
   })
+  updatedVars.value = r ? ctx.applyExtracted(r) : []
   if (r) {
     // 默认展开第一个没通过的步骤；全通过时展开第一步
     const first = r.steps.find((s) => s.status !== 'passed') ?? r.steps[0]
@@ -79,6 +82,7 @@ async function start(): Promise<void> {
       <div class="flow-debug-summary" :class="result.ok ? 'is-ok' : 'is-bad'">
         <strong>{{ result.ok ? '全部步骤通过' : `${passedCount} / ${result.steps.length} 步通过` }}</strong>
         <span class="muted">k6 用时 {{ formatMs(result.durationMs) }}（含启动）· 迭代结束时有 {{ Object.keys(result.vars).length }} 个变量</span>
+        <span v-if="updatedVars.length" class="muted">· 已更新环境变量当前值：<span class="mono">{{ updatedVars.join('、') }}</span></span>
       </div>
       <el-collapse v-model="opened" class="flow-steps">
         <el-collapse-item v-for="(step, index) in result.steps" :key="step.key" :name="step.key">

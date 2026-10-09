@@ -22,6 +22,7 @@ interface FormState {
   type: EnvType | undefined
   baseUrl: string
   headers: KvRow[]
+  variables: KvRow[]
   // 安全上限：留空表示不限制（生产环境必填）
   maxVus: number | undefined
   maxRate: number | undefined
@@ -35,6 +36,7 @@ function emptyForm(): FormState {
     type: undefined,
     baseUrl: '',
     headers: [],
+    variables: [],
     maxVus: undefined,
     maxRate: undefined,
     maxDurationSec: undefined,
@@ -98,6 +100,7 @@ function openEdit(row: Environment): void {
     type: row.type ?? undefined,
     baseUrl: row.baseUrl,
     headers: toRows(row.headers),
+    variables: toRows(row.variables),
     maxVus: row.maxVus ?? undefined,
     maxRate: row.maxRate ?? undefined,
     maxDurationSec: row.maxDurationSec ?? undefined,
@@ -115,6 +118,7 @@ async function save(): Promise<void> {
     // 去掉末尾的斜杠，接口的 path 以 / 开头，直接拼在后面
     baseUrl: form.baseUrl.trim().replace(/\/+$/, ''),
     headers: fromRows(form.headers),
+    variables: fromRows(form.variables),
     maxVus: form.maxVus ?? null,
     maxRate: form.maxRate ?? null,
     maxDurationSec: form.maxDurationSec ?? null,
@@ -212,7 +216,18 @@ async function save(): Promise<void> {
             value-placeholder="值"
             add-text="添加请求头"
           />
-          <div class="form-hint">发往这个环境的所有请求都会带上这些请求头。</div>
+          <div class="form-hint">发往这个环境的所有请求都会带上这些请求头；接口里同名的请求头会覆盖它。接口页的“请求头”里能看到继承来的这些。</div>
+        </el-form-item>
+        <el-form-item label="环境变量">
+          <KeyValueEditor
+            v-model="form.variables"
+            key-placeholder="变量名，如 token、tenantId"
+            value-placeholder="初始值"
+            add-text="添加变量"
+          />
+          <div class="form-hint">
+            接口的路径、请求头、请求体里用 <code v-pre>{{变量名}}</code> 引用。这里是初始值：压测每次迭代都从它开始；调试时页面会记住“当前值”，发送后提取到的变量自动更新当前值，不会改这里。
+          </div>
         </el-form-item>
 
         <fieldset class="limit-group" :class="{ 'is-prod': isProd }">

@@ -151,6 +151,7 @@ ENVIRONMENTS = Resource(
         Field("type", "type"),
         Field("baseUrl", "base_url"),
         Field("headers", "headers", json=True),
+        Field("variables", "variables", json=True),
         Field("maxVus", "max_vus"),
         Field("maxRate", "max_rate"),
         Field("maxDurationSec", "max_duration_sec"),

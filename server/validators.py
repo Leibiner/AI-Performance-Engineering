@@ -126,6 +126,21 @@ def validate_environment(data: Any, conn: sqlite3.Connection) -> dict:
         out["baseUrl"] = data["baseUrl"].strip().rstrip("/")
     out["headers"] = c.headers()
 
+    # 环境变量（初始值）：变量名 → 字符串。运行和调试开始时作为初始变量，接口里用 {{变量名}} 引用
+    raw_vars = data.get("variables")
+    out["variables"] = {}
+    if raw_vars is not None:
+        if not isinstance(raw_vars, dict):
+            c.err("variables（环境变量）必须是对象（变量名 → 值）")
+        else:
+            for name, value in raw_vars.items():
+                if not isinstance(name, str) or not VAR_NAME_RE.match(name.strip()):
+                    c.err(f"环境变量名 {name!r} 只能包含字母、数字、下划线")
+                elif not isinstance(value, str):
+                    c.err(f"环境变量 {name} 的值必须是字符串")
+                else:
+                    out["variables"][name.strip()] = value
+
     env_type = data.get("type")
     if env_type not in ENV_TYPES:
         c.err("type（被测环境类型）必填，且必须是 dev（开发）/ test（测试）/ staging（预发）/ prod（生产）之一")

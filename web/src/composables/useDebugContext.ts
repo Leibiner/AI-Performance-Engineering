@@ -1,14 +1,20 @@
 import { computed, h, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
-import { environmentsApi, type Environment } from '../api'
+import { environmentsApi, type DebugResult, type Environment } from '../api'
 import { showError } from '../utils/feedback'
-import { fromRows, type KvRow } from '../utils/kv'
+import { fromRows, toRows, type KvRow } from '../utils/kv'
 
 // 调试上下文：当前调试环境、初始变量、已经确认过的生产环境。放在模块级，切换页面后还在，
 // 像 Postman 右上角的环境选择一样是"当前工作环境"，不是某个接口的字段：
 // 页头右上角、接口页请求栏里的地址前缀、流程试跑对话框里的选择器，改的都是同一个值。
-// 环境 id 存 localStorage，刷新后还在；变量和生产确认只在本次会话里。
+// 环境 id 和每个环境的变量当前值存 localStorage，刷新后还在；生产确认只在本次会话里。
+//
+// 变量分两层，和 Postman / Apifox 的环境变量一样：
+//   初始值  存在被测环境上（environments.variables），压测每次迭代都从它开始
+//   当前值  只在浏览器里、按环境分开保存；第一次用某个环境时从初始值复制一份；
+//           每次发送 / 试跑后，提取到的变量写回当前值，下一个请求就能直接用
 const STORAGE_KEY = 'perf-console.debugEnvId'
+const VARS_KEY = 'perf-console.debugVars'
 
 function readStoredEnvId(): number | undefined {
   try {
@@ -17,6 +23,16 @@ function readStoredEnvId(): number | undefined {
     return Number.isInteger(n) && n > 0 ? n : undefined
   } catch {
     return undefined
+  }
+}
+
+function readStoredVars(): Record<string, KvRow[]> {
+  try {
+    const raw = window.localStorage.getItem(VARS_KEY)
+    const data = raw ? JSON.parse(raw) : {}
+    return data && typeof data === 'object' ? data : {}
+  } catch {
+    return {}
   }
 }
 
@@ -29,7 +45,19 @@ watch(envId, (value) => {
     // 隐私模式等情况下写不了，忽略
   }
 })
-const varRows = ref<KvRow[]>([])
+/** 环境 id → 当前值 */
+const currentByEnv = ref<Record<string, KvRow[]>>(readStoredVars())
+watch(
+  currentByEnv,
+  (value) => {
+    try {
+      window.localStorage.setItem(VARS_KEY, JSON.stringify(value))
+    } catch {
+      // 写不了就只在本次会话里有效
+    }
+  },
+  { deep: true },
+)
 const environments = ref<Environment[]>([])
 const loaded = ref(false)
 /** 本次会话里已经确认过"向生产环境发送"的被测环境 id */
@@ -37,8 +65,49 @@ const confirmedProd = ref<Set<number>>(new Set())
 
 export function useDebugContext() {
   const environment = computed(() => environments.value.find((e) => e.id === envId.value) ?? null)
+  const initialVars = computed<Record<string, string>>(() => environment.value?.variables ?? {})
+
+  /** 当前环境的变量当前值；第一次用这个环境时从初始值复制 */
+  const varRows = computed<KvRow[]>({
+    get: () => {
+      const env = environment.value
+      if (!env) return []
+      return currentByEnv.value[String(env.id)] ?? toRows(env.variables ?? {})
+    },
+    set: (rows) => {
+      const env = environment.value
+      if (env) currentByEnv.value = { ...currentByEnv.value, [String(env.id)]: rows }
+    },
+  })
   const vars = computed(() => fromRows(varRows.value))
   const varCount = computed(() => varRows.value.filter((r) => r.key.trim() !== '').length)
+
+  /** 把当前值恢复成环境上的初始值 */
+  function resetVars(): void {
+    varRows.value = toRows(initialVars.value)
+  }
+
+  /**
+   * 一次调试结束后，把各步提取到的变量写回当前值（同名覆盖，新的追加在后面）。
+   * 返回写回的变量名，页面用来提示。
+   */
+  function applyExtracted(result: DebugResult): string[] {
+    const updates = new Map<string, string>()
+    for (const step of result.steps) {
+      for (const e of step.extracted) {
+        if (e.ok && e.value !== null) updates.set(e.var, e.value)
+      }
+    }
+    if (!updates.size) return []
+    const rows = varRows.value.map((r) => ({ ...r }))
+    for (const [name, value] of updates) {
+      const row = rows.find((r) => r.key.trim() === name)
+      if (row) row.value = value
+      else rows.push({ key: name, value })
+    }
+    varRows.value = rows
+    return [...updates.keys()]
+  }
 
   async function loadEnvironments(): Promise<void> {
     try {
@@ -84,5 +153,8 @@ export function useDebugContext() {
     }
   }
 
-  return { envId, varRows, vars, varCount, environments, environment, loaded, loadEnvironments, blocker, ensureProdConfirmed }
+  return {
+    envId, varRows, vars, varCount, initialVars, resetVars, applyExtracted,
+    environments, environment, loaded, loadEnvironments, blocker, ensureProdConfirmed,
+  }
 }

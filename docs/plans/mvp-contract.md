@@ -78,10 +78,14 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 {
   "id": 1, "name": "百度（仅冒烟）", "type": "prod", "baseUrl": "https://www.baidu.com",
   "headers": { "User-Agent": "Mozilla/5.0 k6-mvp" },
+  "variables": { "tenant": "demo" },
   "maxVus": 2, "maxRate": 2, "maxDurationSec": 60,
   "note": "第三方线上站点，只允许冒烟级别流量"
 }
 ```
+
+- `headers`：公共请求头，每个请求都带；接口自己的同名请求头（名称不区分大小写）覆盖它
+- `variables`（2026-10-09 加入）：环境变量的**初始值**，变量名 → 字符串，变量名只能是字母、数字、下划线。运行时每次迭代开始、调试开始时都以它为初始变量，接口里用 `{{变量名}}` 引用；步骤提取到的同名变量在本次迭代内覆盖它。运行不会回写它
 
 - 这里的"环境"指**被测环境**（被测系统部署在哪里），不是执行机（§3.3）。
 - `type`：`dev`（开发）、`test`（测试）、`staging`（预发）、`prod`（生产），必填。
@@ -299,7 +303,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 - `envId`：被测环境，必填。请求发往它的 `baseUrl`，并带上它的公共请求头
 - `confirmProd`：被测环境类型为 `prod` 时必须为 `true`（一次请求也是请求，和发起运行的规则一致）
-- `vars`：可选，初始变量（值必须是字符串）。调试单个接口时用它给 `{{变量}}` 赋值；试跑流程时作为迭代开始前的初值，会被后续步骤提取到的同名变量覆盖
+- `vars`：可选，调试的**当前值**（值必须是字符串），覆盖被测环境 `variables` 里的同名初始值。页面按环境保存当前值，并在每次调试后把提取到的变量写回去（类似 Postman 环境变量的 current value），所以连续调试时上一步取到的 token 能直接用于下一步；试跑流程时它是迭代开始前的初值，会被后续步骤提取到的同名变量覆盖
 - `api`：一份接口定义（字段同 §3.1 的接口，**不要求已保存**，页面上正在编辑的内容可以直接发），按单步流程执行；校验失败返回 400，`details` 和保存接口时一致
 - `flowId`：已保存的业务流程，按它的步骤顺序执行
 
@@ -372,7 +376,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   "schemaVersion": 1,
   "runId": "20260930T101500Z-a1b2c3",
   "test": { "id": 1, "name": "百度首页冒烟" },
-  "env": { "id": 1, "name": "百度（仅冒烟）", "type": "prod", "baseUrl": "https://www.baidu.com", "headers": { "User-Agent": "Mozilla/5.0 k6-mvp" } },
+  "env": { "id": 1, "name": "百度（仅冒烟）", "type": "prod", "baseUrl": "https://www.baidu.com", "headers": { "User-Agent": "Mozilla/5.0 k6-mvp" }, "variables": {} },
   "profile": { "id": 1, "name": "冒烟", "type": "smoke", "model": "closed", "config": { "vus": 1, "iterations": 10, "maxDurationSec": 30 } },
   "flows": [
     {
@@ -394,6 +398,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 - `flows[].key`：`f<序号>`；`steps[].key`：`<flowKey>s<序号>`。只用 ASCII，因为要作为 k6 的 scenario 名和 tag 值
 - `weight` 已归一化，和为 1
+- `env.variables`：被测环境的环境变量初始值，每次迭代开始时的变量；调试时 `debug.vars` 覆盖同名项。旧的快照没有这个字段，引擎按空对象处理
 - `debug`（可选，只有调试时有，见 §3.5）：`{ "vars": { "token": "abc" }, "bodyLimit": 65536 }`。存在时引擎进入**调试模式**：不等待 `thinkTimeMs`；每一步都保留响应体（最多 `bodyLimit` 个字符）；逐步记录请求、响应、检查和变量；迭代结束后把记录写到 console（§5.1）；`handleSummary` 不写 `run-record.json` 和 `k6-summary.json`。调试的 plan 里 `test.id` 为 `0`、`profile.id` 为 `0`、`profile.name` 为"调试"，`profile.config` 固定为 `{ "vus": 1, "iterations": 1, "maxDurationSec": N }`，`slo` 四项都为 `null`；`runId` 形如 `dbg-20261009T062206Z-6abec2`
 
 ### 启动 k6 的方式（后端负责）

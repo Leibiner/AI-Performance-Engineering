@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 基线对比、趋势、CI、Prometheus / Grafana、Trace、Evidence Bundle、分布式、任何 AI 功能都**还没有实现**，不要当成已有能力来用或引用。
 - 不要主动开始下一个阶段的实现；不要提前创建空目录（规划中的目录见 `ARCHITECTURE.md` §5.2 末尾的表）。
 - 2026-10-09 加入**调试**：接口页是 Postman 式工作台，能把正在编辑的接口用真实 k6 发送一次看响应；业务流程页能试跑一次迭代；支持从 cURL 导入接口。OpenAPI / Postman Collection 导入**未做**。
+- 2026-10-09 加入**环境变量**（`environments.variables`，表结构版本 4）：初始值进 plan 的 `env.variables`，每次迭代从它开始；调试的当前值按环境存在浏览器里，提取到的变量自动写回。接口页请求头显示继承自环境的请求头。
 - 2026-10-09 加入**接口文件夹**（`folders` 表，可嵌套；`apis.folder_id`，表结构版本 3）：只用于页面分组，不进 plan、不影响运行；非空文件夹不能删。
 
 ## 命令

@@ -104,11 +104,14 @@ function compileStep(plan, flow, step) {
 
 /** init 阶段调用一次。返回 { [flow.key]: 已编译的 flow }。 */
 export function compileFlows(plan) {
+  // 环境变量的初始值：每次迭代开始时的变量（契约 §4 env.variables）
+  const initialVars = plan.env && plan.env.variables && typeof plan.env.variables === 'object' ? plan.env.variables : {};
   const compiled = {};
   for (const flow of plan.flows) {
     compiled[flow.key] = {
       key: flow.key,
       name: flow.name,
+      initialVars,
       steps: flow.steps.map((step) => compileStep(plan, flow, step)),
     };
   }
@@ -270,7 +273,8 @@ function runStep(step, vars, debug) {
  * @returns 调试时返回 { steps, vars }（契约 §5.1）；压测时无返回值
  */
 export function executeFlow(flow, debug) {
-  const vars = debug && debug.vars ? Object.assign({}, debug.vars) : {};
+  // 环境变量打底，调试时页面上的当前值覆盖同名项
+  const vars = Object.assign({}, flow.initialVars || {}, debug && debug.vars ? debug.vars : {});
   const rec = debug ? { steps: [], bodyLimit: debug.bodyLimit } : null;
   let stopped = false;
   for (const step of flow.steps) {
