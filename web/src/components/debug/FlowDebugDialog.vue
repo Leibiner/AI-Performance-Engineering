@@ -6,9 +6,10 @@ import { useDebug } from '../../composables/useDebug'
 import { useDebugContext } from '../../composables/useDebugContext'
 import { STEP_STATUS } from '../../utils/debug'
 import { formatMs } from '../../utils/format'
-import DebugContextBar from './DebugContextBar.vue'
 import DebugErrorView from './DebugErrorView.vue'
 import DebugStepPanel from './DebugStepPanel.vue'
+import DebugVarsEditor from './DebugVarsEditor.vue'
+import EnvPicker from './EnvPicker.vue'
 
 // 试跑业务流程：选被测环境后用真实 k6 跑一次迭代，逐步展示结果。
 const visible = defineModel<boolean>({ required: true })
@@ -30,6 +31,7 @@ const passedCount = computed(() => result.value?.steps.filter((s) => s.status ==
 async function start(): Promise<void> {
   const env = ctx.environment.value
   if (!props.flow || !env || ctx.blocker.value) return
+  if (!(await ctx.ensureProdConfirmed())) return
   const r = await run({
     envId: env.id,
     ...(env.type === 'prod' ? { confirmProd: true } : {}),
@@ -50,7 +52,18 @@ async function start(): Promise<void> {
       用真实 k6 按顺序执行一次（1 并发、1 次迭代），步骤之间不等待。某一步的检查没通过时，后面的步骤不执行，和压测时的行为一致。不产生运行记录。
     </p>
     <div class="flow-debug-bar">
-      <DebugContextBar />
+      <span class="muted">发往</span>
+      <EnvPicker />
+      <el-popover placement="bottom-start" :width="560" trigger="click">
+        <template #reference>
+          <el-button text bg>
+            变量
+            <span v-if="ctx.varCount.value" class="flow-debug-count">{{ ctx.varCount.value }}</span>
+          </el-button>
+        </template>
+        <DebugVarsEditor />
+      </el-popover>
+      <span class="flow-debug-spacer" />
       <el-tooltip :content="ctx.blocker.value ?? ''" :disabled="!ctx.blocker.value" placement="top">
         <span>
           <el-button type="primary" :icon="VideoPlay" :loading="running" :disabled="!!ctx.blocker.value" @click="start">
@@ -103,9 +116,20 @@ async function start(): Promise<void> {
   background: #fafbfc;
   margin-bottom: 14px;
 }
-.flow-debug-bar > :first-child {
+.flow-debug-spacer {
   flex: 1;
-  min-width: 0;
+}
+.flow-debug-count {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--el-color-primary);
+  color: #fff;
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
 }
 .flow-debug-summary {
   display: flex;

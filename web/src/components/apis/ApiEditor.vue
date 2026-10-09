@@ -13,11 +13,12 @@ import type { KvRow } from '../../utils/kv'
 import { METHODS, METHOD_COLOR } from '../../utils/method'
 import { joinPath, splitPath } from '../../utils/query'
 import KeyValueEditor from '../KeyValueEditor.vue'
-import DebugContextBar from '../debug/DebugContextBar.vue'
 import DebugErrorView from '../debug/DebugErrorView.vue'
 import DebugStepPanel from '../debug/DebugStepPanel.vue'
+import DebugVarsEditor from '../debug/DebugVarsEditor.vue'
+import EnvPicker from '../debug/EnvPicker.vue'
 
-// 接口工作台：请求栏（方法、被测环境地址 + 路径、发送、保存）、请求标签页、调试上下文、响应面板。
+// 接口工作台：请求栏（方法、被测环境 + 路径、发送、保存）、请求标签页（含调试变量）、响应面板。
 // 发送的是正在编辑的内容，不要求先保存。
 const form = defineModel<ApiForm>({ required: true })
 defineProps<{ isNew: boolean; dirty: boolean; saving: boolean }>()
@@ -89,6 +90,7 @@ const sendBlocker = computed<string | null>(() => {
 async function send(): Promise<void> {
   const env = ctx.environment.value
   if (!env || sendBlocker.value || running.value) return
+  if (!(await ctx.ensureProdConfirmed())) return
   const input = toInput(form.value)
   if (!input.name) input.name = '未命名接口'
   await run({
@@ -165,14 +167,8 @@ async function copyCurl(): Promise<void> {
           <span :style="{ color: METHOD_COLOR[m], fontWeight: 700 }">{{ m }}</span>
         </el-option>
       </el-select>
-      <div class="url-box" :class="{ 'is-focus': false }">
-        <span
-          class="url-base"
-          :class="{ 'is-empty': !ctx.environment.value }"
-          :title="ctx.environment.value ? `被测环境「${ctx.environment.value.name}」的基础地址` : '先在下面选择被测环境'"
-        >
-          {{ ctx.environment.value?.baseUrl ?? '（被测环境地址）' }}
-        </span>
+      <div class="url-box">
+        <EnvPicker seamless class="url-env" />
         <el-input v-model="form.path" class="url-path" placeholder="/api/orders/{{orderId}}?page=1" />
       </div>
       <el-tooltip :content="sendBlocker ?? 'Ctrl + Enter'" placement="bottom">
@@ -184,8 +180,6 @@ async function copyCurl(): Promise<void> {
       </el-tooltip>
       <el-button :loading="saving" :disabled="!dirty" @click="emit('save')">保存</el-button>
     </div>
-
-    <DebugContextBar class="editor-ctx" />
 
     <el-tabs v-model="tab" class="req-tabs">
       <el-tab-pane name="params">
@@ -254,6 +248,11 @@ async function copyCurl(): Promise<void> {
 
       <el-tab-pane name="note" label="备注">
         <el-input v-model="form.note" type="textarea" :rows="3" placeholder="这个接口是做什么的、注意事项" />
+      </el-tab-pane>
+
+      <el-tab-pane name="vars">
+        <template #label>调试变量<span v-if="ctx.varCount.value" class="tab-count">{{ ctx.varCount.value }}</span></template>
+        <DebugVarsEditor />
       </el-tab-pane>
     </el-tabs>
 
@@ -343,24 +342,10 @@ async function copyCurl(): Promise<void> {
   border-color: var(--el-color-primary);
   box-shadow: 0 0 0 1px var(--el-color-primary) inset;
 }
-.url-base {
-  display: flex;
-  align-items: center;
-  max-width: 42%;
-  padding: 0 10px;
+.url-env {
+  flex-shrink: 0;
+  max-width: 48%;
   border-right: 1px solid var(--hairline);
-  background: #f4f5f7;
-  color: var(--el-text-color-regular);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12.5px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: default;
-}
-.url-base.is-empty {
-  color: var(--ink-muted);
-  font-style: italic;
 }
 .url-path {
   flex: 1;
@@ -378,13 +363,6 @@ async function copyCurl(): Promise<void> {
 }
 .request-bar .el-button + .el-button {
   margin-left: 0;
-}
-
-.editor-ctx {
-  padding: 8px 12px;
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
-  background: #fafbfc;
 }
 
 .req-tabs :deep(.el-tabs__header) {

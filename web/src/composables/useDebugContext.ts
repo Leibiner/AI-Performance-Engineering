@@ -1,20 +1,17 @@
-import { computed, ref, watch } from 'vue'
+import { computed, h, ref } from 'vue'
+import { ElMessageBox } from 'element-plus'
 import { environmentsApi, type Environment } from '../api'
 import { showError } from '../utils/feedback'
 import { fromRows, type KvRow } from '../utils/kv'
 
-// 调试上下文：选中的被测环境、初始变量、生产环境的确认。放在模块级，切换页面后还在，
+// 调试上下文：选中的被测环境、初始变量、已经确认过的生产环境。放在模块级，切换页面后还在，
 // 像 Postman 右上角的环境选择一样是"当前工作环境"，不是某个表单的字段。
 const envId = ref<number | undefined>()
 const varRows = ref<KvRow[]>([])
-const prodConfirmed = ref(false)
 const environments = ref<Environment[]>([])
 const loaded = ref(false)
-
-// 换了环境，之前对生产环境的确认不再算数
-watch(envId, () => {
-  prodConfirmed.value = false
-})
+/** 本次会话里已经确认过"向生产环境发送"的被测环境 id */
+const confirmedProd = ref<Set<number>>(new Set())
 
 export function useDebugContext() {
   const environment = computed(() => environments.value.find((e) => e.id === envId.value) ?? null)
@@ -33,11 +30,37 @@ export function useDebugContext() {
   }
 
   /** 现在能不能发送；不能时返回原因 */
-  const blocker = computed<string | null>(() => {
-    if (!environment.value) return '先选择被测环境'
-    if (environment.value.type === 'prod' && !prodConfirmed.value) return '生产环境需要先勾选确认'
-    return null
-  })
+  const blocker = computed<string | null>(() => (environment.value ? null : '先选择被测环境'))
 
-  return { envId, varRows, vars, varCount, prodConfirmed, environments, environment, loaded, loadEnvironments, blocker }
+  /**
+   * 被测环境是生产时，首次发送前弹一次确认；确认过的环境本次会话内不再问。
+   * 返回 false 表示用户取消。非生产环境直接返回 true。
+   */
+  async function ensureProdConfirmed(): Promise<boolean> {
+    const env = environment.value
+    if (!env || env.type !== 'prod' || confirmedProd.value.has(env.id)) return true
+    try {
+      await ElMessageBox.confirm(
+        h('div', { class: 'prod-confirm' }, [
+          h('p', { class: 'prod-confirm-lead' }, '你正在向生产环境发送请求'),
+          h('dl', [h('dt', '被测环境'), h('dd', env.name), h('dt', '地址'), h('dd', { class: 'mono' }, env.baseUrl)]),
+          h('p', '调试会真实地发出 1 次请求。请确认已获得许可。确认后本次会话内对这个环境不再提示。'),
+        ]),
+        '向生产环境发送',
+        {
+          type: 'warning',
+          confirmButtonText: '确认，发送',
+          cancelButtonText: '取消',
+          confirmButtonClass: 'el-button--danger',
+          autofocus: false,
+        },
+      )
+      confirmedProd.value.add(env.id)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  return { envId, varRows, vars, varCount, environments, environment, loaded, loadEnvironments, blocker, ensureProdConfirmed }
 }
