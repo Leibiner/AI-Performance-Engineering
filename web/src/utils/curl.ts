@@ -182,6 +182,7 @@ export function curlToApi(parsed: ParsedCurl): CurlImport {
   return {
     origin,
     input: {
+      folderId: null,
       name: `${parsed.method} ${pathname}`.slice(0, 100),
       method: parsed.method,
       path,

@@ -115,6 +115,14 @@ def _decorate_tests(tests: list[dict], conn: sqlite3.Connection) -> None:
         )
 
 
+def _guard_folder_delete(folder_id: int, conn: sqlite3.Connection) -> None:
+    """非空的文件夹不能删：先把里面的子文件夹和接口移走或删掉。"""
+    used = [f"子文件夹“{r['name']}”（#{r['id']}）" for r in conn.execute("SELECT id, name FROM folders WHERE parent_id = ?", (folder_id,))]
+    used += [f"接口“{r['name']}”（#{r['id']}）" for r in conn.execute("SELECT id, name FROM apis WHERE folder_id = ?", (folder_id,))]
+    if used:
+        raise conflict("该文件夹不是空的，不能删除。请先把里面的内容移走或删除", used)
+
+
 def _guard_api_delete(api_id: int, conn: sqlite3.Connection) -> None:
     used = [
         f"业务流程“{flow['name']}”（#{flow['id']}）"
@@ -151,10 +159,19 @@ ENVIRONMENTS = Resource(
     validate=validators.validate_environment,
 )
 
+FOLDERS = Resource(
+    name="folders",
+    label="文件夹",
+    fields=(Field("name", "name"), Field("parentId", "parent_id"), Field("note", "note")),
+    validate=validators.validate_folder,
+    guard_delete=_guard_folder_delete,
+)
+
 APIS = Resource(
     name="apis",
     label="接口",
     fields=(
+        Field("folderId", "folder_id"),
         Field("name", "name"),
         Field("method", "method"),
         Field("path", "path"),
@@ -204,7 +221,7 @@ TESTS = Resource(
     decorate=_decorate_tests,
 )
 
-RESOURCES = (ENVIRONMENTS, APIS, FLOWS, PROFILES, TESTS)
+RESOURCES = (ENVIRONMENTS, FOLDERS, APIS, FLOWS, PROFILES, TESTS)
 
 
 # ---------- 路由 ----------
@@ -231,6 +248,9 @@ def _build_router(res: Resource) -> APIRouter:
 
     @router.put("/{item_id}", summary=f"整体替换{res.label}")
     def replace_item(item_id: int, payload: Any = Body(...)):
+        # 让校验器知道正在改的是哪一条（文件夹要据此防止把自己放到自己下面）；多余字段校验器本来就忽略
+        if isinstance(payload, dict):
+            payload = {**payload, "id": item_id}
         with db.connect() as conn:
             _require(conn, res, item_id)
             data = res.validate(payload, conn)

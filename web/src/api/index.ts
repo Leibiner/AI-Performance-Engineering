@@ -12,6 +12,8 @@ import type {
   ExecutorInput,
   Flow,
   FlowInput,
+  Folder,
+  FolderInput,
   Overview,
   Profile,
   ProfileInput,
@@ -57,6 +59,7 @@ export const executorsApi = {
 }
 
 export const environmentsApi = resource<Environment, EnvironmentInput>('environments')
+export const foldersApi = resource<Folder, FolderInput>('folders')
 export const apisApi = resource<ApiDef, ApiDefInput>('apis')
 export const flowsApi = resource<Flow, FlowInput>('flows')
 export const profilesApi = resource<Profile, ProfileInput>('profiles')

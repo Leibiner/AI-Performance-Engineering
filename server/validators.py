@@ -146,9 +146,49 @@ def validate_environment(data: Any, conn: sqlite3.Connection) -> dict:
     return out
 
 
+def _folder_id(c: _Checker, conn: sqlite3.Connection, key: str, label: str) -> int | None:
+    """文件夹 id：null 表示根目录；否则必须是存在的文件夹。"""
+    value = c.data.get(key)
+    if value is None:
+        return None
+    if not is_int(value):
+        c.err(f"{label} 必须是整数或 null")
+        return None
+    if conn.execute("SELECT 1 FROM folders WHERE id = ?", (value,)).fetchone() is None:
+        c.err(f"{label} 指向的文件夹 #{value} 不存在")
+        return None
+    return value
+
+
+def validate_folder(data: Any, conn: sqlite3.Connection) -> dict:
+    """接口文件夹。parentId 为 null 表示顶层；不能把文件夹放到自己或自己的子孙下面（PUT 时请求体里带 id）。"""
+    c = _Checker(data)
+    out: dict[str, Any] = {"name": c.name(), "note": c.note()}
+    parent = _folder_id(c, conn, "parentId", "parentId（上级文件夹）")
+    own = data.get("id")
+    if parent is not None and is_int(own):
+        if parent == own:
+            c.err("不能把文件夹放到它自己下面")
+        else:
+            # 沿上级链往上走，碰到自己就是环
+            seen: set[int] = set()
+            cursor: int | None = parent
+            while cursor is not None and cursor not in seen:
+                seen.add(cursor)
+                if cursor == own:
+                    c.err("不能把文件夹放到它自己的子文件夹下面")
+                    break
+                row = conn.execute("SELECT parent_id FROM folders WHERE id = ?", (cursor,)).fetchone()
+                cursor = row[0] if row else None
+    out["parentId"] = parent
+    c.done()
+    return out
+
+
 def validate_api(data: Any, conn: sqlite3.Connection) -> dict:
     c = _Checker(data)
     out: dict[str, Any] = {"name": c.name()}
+    out["folderId"] = _folder_id(c, conn, "folderId", "folderId（所属文件夹）")
 
     method = data.get("method")
     if not isinstance(method, str) or method.strip().upper() not in METHODS:

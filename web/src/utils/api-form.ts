@@ -3,6 +3,7 @@ import type { ApiDefInput, Extract, HttpMethod } from '../api'
 import { fromRows, toRows, type KvRow } from './kv'
 
 export interface ApiForm {
+  folderId: number | null
   name: string
   method: HttpMethod
   path: string
@@ -14,8 +15,9 @@ export interface ApiForm {
   note: string
 }
 
-export function emptyForm(): ApiForm {
+export function emptyForm(folderId: number | null = null): ApiForm {
   return {
+    folderId,
     name: '',
     method: 'GET',
     path: '/',
@@ -30,6 +32,7 @@ export function emptyForm(): ApiForm {
 
 export function fromApi(api: ApiDefInput): ApiForm {
   return {
+    folderId: api.folderId ?? null,
     name: api.name,
     method: api.method,
     path: api.path,
@@ -44,6 +47,7 @@ export function fromApi(api: ApiDefInput): ApiForm {
 
 export function toInput(form: ApiForm): ApiDefInput {
   return {
+    folderId: form.folderId,
     name: form.name.trim(),
     method: form.method,
     path: form.path.trim(),

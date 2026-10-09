@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { ArrowDown, ArrowUp, Delete, Plus, VideoPlay } from '@element-plus/icons-vue'
-import { apisApi, flowsApi, type ApiDef, type Flow, type FlowInput } from '../api'
+import { apisApi, flowsApi, foldersApi, type ApiDef, type Flow, type FlowInput, type Folder } from '../api'
+import { folderPath } from '../utils/folders'
 import { useResourceList } from '../composables/useResourceList'
 import { showError } from '../utils/feedback'
 import PageHeader from '../components/PageHeader.vue'
@@ -11,16 +12,36 @@ import FlowDebugDialog from '../components/debug/FlowDebugDialog.vue'
 
 const { items, loading, load, remove } = useResourceList(flowsApi, '业务流程')
 
-// 步骤里要选接口
+// 步骤里要选接口；接口按文件夹分组显示
 const apis = ref<ApiDef[]>([])
+const folders = ref<Folder[]>([])
 async function loadApis(): Promise<void> {
   try {
-    apis.value = await apisApi.list()
+    const [a, f] = await Promise.all([apisApi.list(), foldersApi.list()])
+    apis.value = a
+    folders.value = f
   } catch (e) {
     showError(e, '加载接口失败')
   }
 }
 onMounted(loadApis)
+
+interface ApiGroup {
+  label: string
+  apis: ApiDef[]
+}
+const apiGroups = computed<ApiGroup[]>(() => {
+  const groups = new Map<string, ApiDef[]>()
+  for (const api of apis.value) {
+    const label = folderPath(folders.value, api.folderId) || '（根目录）'
+    const list = groups.get(label)
+    if (list) list.push(api)
+    else groups.set(label, [api])
+  }
+  return [...groups.entries()]
+    .map(([label, list]) => ({ label, apis: list }))
+    .sort((a, b) => (a.label === '（根目录）' ? 1 : b.label === '（根目录）' ? -1 : a.label.localeCompare(b.label, 'zh-Hans-CN')))
+})
 
 interface StepRow {
   apiId: number | undefined
@@ -177,7 +198,14 @@ async function save(): Promise<void> {
             <div v-for="(step, index) in form.steps" :key="index" class="row-item">
               <span class="row-index">{{ index + 1 }}</span>
               <el-select v-model="step.apiId" class="grow" filterable placeholder="选择接口" no-data-text="还没有接口，请先到“接口”页面新建">
-                <el-option v-for="api in apis" :key="api.id" :label="`${api.name}（${api.method} ${api.path}）`" :value="api.id" />
+                <template v-if="folders.length">
+                  <el-option-group v-for="group in apiGroups" :key="group.label" :label="group.label">
+                    <el-option v-for="api in group.apis" :key="api.id" :label="`${api.name}（${api.method} ${api.path}）`" :value="api.id" />
+                  </el-option-group>
+                </template>
+                <template v-else>
+                  <el-option v-for="api in apis" :key="api.id" :label="`${api.name}（${api.method} ${api.path}）`" :value="api.id" />
+                </template>
               </el-select>
               <el-input-number
                 v-model="step.thinkTimeMs"

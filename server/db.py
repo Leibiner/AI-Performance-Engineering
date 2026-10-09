@@ -7,6 +7,7 @@ JSON 类字段存 TEXT，数值类字段用 NUMERIC（整数存整数，小数�
 表结构版本记在 `PRAGMA user_version`：
   1  最初的六张表
   2  environments 增加 type、三个安全上限可为空；新增 executors；runs 增加 env_type、executor_id、executor_name
+  3  新增 folders（接口文件夹，可嵌套）；apis 增加 folder_id
 全新的库直接建成最新结构；旧库在启动时逐级迁移，迁移前先备份，整个迁移在一个事务里。
 """
 
@@ -21,7 +22,7 @@ from . import config
 
 log = logging.getLogger("uvicorn.error")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 LOCAL_EXECUTOR_NAME = "本机执行机"
 
@@ -54,13 +55,25 @@ CREATE TABLE IF NOT EXISTS executors (
     updated_at TEXT NOT NULL
 )"""
 
+_FOLDERS_DDL = """
+CREATE TABLE IF NOT EXISTS folders (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    parent_id  INTEGER,
+    note       TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)"""
+
 # 最新结构。全部是 IF NOT EXISTS，每次启动执行一遍
 _SCHEMA = [
     _environments_ddl(),
     _EXECUTORS_DDL,
+    _FOLDERS_DDL,
     """
 CREATE TABLE IF NOT EXISTS apis (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    folder_id            INTEGER,
     name                 TEXT NOT NULL,
     method               TEXT NOT NULL,
     path                 TEXT NOT NULL,
@@ -132,7 +145,7 @@ CREATE TABLE IF NOT EXISTS runs (
     "CREATE INDEX IF NOT EXISTS idx_runs_test ON runs (test_id, started_at DESC)",
 ]
 
-DEFINITION_TABLES = ("environments", "apis", "flows", "profiles", "tests")
+DEFINITION_TABLES = ("environments", "folders", "apis", "flows", "profiles", "tests")
 
 
 @contextmanager
@@ -238,6 +251,13 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+    """版本 2 → 3：接口文件夹。加一张表、一列，旧接口的 folder_id 为空（在根目录）。"""
+    conn.execute(_FOLDERS_DDL)
+    if "folder_id" not in _columns(conn, "apis"):
+        conn.execute("ALTER TABLE apis ADD COLUMN folder_id INTEGER")
+
+
 def init() -> bool:
     """建表或迁移（幂等）。返回 True 表示这是一个全新的库，需要写入种子数据。"""
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -267,7 +287,19 @@ def init() -> bool:
                 log.error("数据库迁移失败，已回滚，库文件没有被改动：%s", config.DB_PATH)
                 raise
             log.info("数据库已从版本 1 迁移到版本 2：%s", config.DB_PATH)
-        # 以后的迁移接在这里：if 结构还是版本 2：备份 → BEGIN → _migrate_v2_to_v3 → user_version = 3 → COMMIT
+        if existed and "folder_id" not in _columns(conn, "apis"):
+            _backup(conn, 2)
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                _migrate_v2_to_v3(conn)
+                conn.execute("PRAGMA user_version = 3")
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                log.error("数据库迁移失败，已回滚，库文件没有被改动：%s", config.DB_PATH)
+                raise
+            log.info("数据库已从版本 2 迁移到版本 3：%s", config.DB_PATH)
+        # 以后的迁移接在这里：if 结构还是版本 3：备份 → BEGIN → _migrate_v3_to_v4 → user_version = 4 → COMMIT
 
         conn.execute("BEGIN IMMEDIATE")
         try:

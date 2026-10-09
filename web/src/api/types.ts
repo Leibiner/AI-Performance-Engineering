@@ -59,6 +59,16 @@ export interface EnvironmentInput {
 }
 export type Environment = EnvironmentInput & Stamped
 
+// ---------- 文件夹（接口的分组，可嵌套） ----------
+
+export interface FolderInput {
+  name: string
+  /** 上级文件夹；null 表示顶层 */
+  parentId: number | null
+  note: string
+}
+export type Folder = FolderInput & Stamped
+
 // ---------- 接口 ----------
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
@@ -71,6 +81,8 @@ export interface Extract {
 }
 
 export interface ApiDefInput {
+  /** 所属文件夹；null 表示根目录 */
+  folderId: number | null
   name: string
   method: HttpMethod
   path: string

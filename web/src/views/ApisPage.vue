@@ -1,19 +1,88 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { apisApi, type ApiDef } from '../api'
+import { computed, onMounted, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { apisApi, foldersApi, type ApiDef, type Folder } from '../api'
 import { useResourceList } from '../composables/useResourceList'
 import { confirmAction, showError } from '../utils/feedback'
 import { emptyForm, fromApi, snapshot, toInput, type ApiForm } from '../utils/api-form'
 import type { CurlImport } from '../utils/curl'
+import { buildFolderTree, folderOptions, folderPath } from '../utils/folders'
 import PageHeader from '../components/PageHeader.vue'
 import ApiList from '../components/apis/ApiList.vue'
 import ApiEditor from '../components/apis/ApiEditor.vue'
 import CurlImportDialog from '../components/apis/CurlImportDialog.vue'
 import DebugEnvBar from '../components/debug/DebugEnvBar.vue'
 
-// 接口页：左栏列表，右栏工作台（编辑 + 发送 + 看响应）。像 Postman 一样，一个接口占满右栏，不用对话框。
+// 接口页：左栏文件夹树（项目 → 模块 → 接口），右栏工作台（编辑 + 发送 + 看响应）。像 Postman 一样，一个接口占满右栏，不用对话框。
 const { items, loading, load, remove } = useResourceList(apisApi, '接口')
+
+// ---------- 文件夹 ----------
+const folders = ref<Folder[]>([])
+/** 树里当前所在的文件夹：新建接口 / 文件夹时的默认位置。null = 根目录 */
+const currentFolderId = ref<number | null>(null)
+async function loadFolders(): Promise<void> {
+  try {
+    folders.value = await foldersApi.list()
+  } catch (e) {
+    showError(e, '加载文件夹失败')
+  }
+}
+onMounted(loadFolders)
+const folderTree = computed(() => buildFolderTree(folders.value, items.value))
+const folderSelectOptions = computed(() => folderOptions(folderTree.value.roots))
+
+async function promptName(title: string, initial = ''): Promise<string | null> {
+  try {
+    const { value } = await ElMessageBox.prompt('', title, {
+      inputValue: initial,
+      inputPlaceholder: '文件夹名称，例如：订单系统、下单模块',
+      inputValidator: (v: string) => (v.trim() ? true : '请输入名称'),
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+    })
+    return value.trim()
+  } catch {
+    return null
+  }
+}
+async function createFolder(parentId: number | null): Promise<void> {
+  const where = parentId === null ? '新建顶层文件夹' : `在「${folderPath(folders.value, parentId)}」下新建文件夹`
+  const name = await promptName(where)
+  if (!name) return
+  try {
+    const created = await foldersApi.create({ name, parentId, note: '' })
+    await loadFolders()
+    currentFolderId.value = created.id
+    ElMessage.success(`已新建文件夹「${name}」`)
+  } catch (e) {
+    showError(e, '新建文件夹失败')
+  }
+}
+async function renameFolder(folder: Folder): Promise<void> {
+  const name = await promptName('重命名文件夹', folder.name)
+  if (!name || name === folder.name) return
+  try {
+    await foldersApi.update(folder.id, { ...folder, name })
+    await loadFolders()
+  } catch (e) {
+    showError(e, '重命名失败')
+  }
+}
+async function deleteFolder(folder: Folder): Promise<void> {
+  const ok = await confirmAction(`确定删除文件夹「${folder.name}」吗？只有空文件夹能删除。`, '删除文件夹', true)
+  if (!ok) return
+  try {
+    await foldersApi.remove(folder.id)
+    await loadFolders()
+    if (currentFolderId.value === folder.id) currentFolderId.value = folder.parentId
+    ElMessage.success('已删除')
+  } catch (e) {
+    showError(e, '删除失败')
+  }
+}
+function selectFolder(folderId: number | null): void {
+  currentFolderId.value = folderId
+}
 
 const selectedId = ref<number | null>(null)
 /** 正在编辑的内容；null 表示既没选中也没在新建 */
@@ -25,6 +94,8 @@ const importVisible = ref(false)
 
 const isNew = computed(() => form.value !== null && selectedId.value === null)
 const dirty = computed(() => form.value !== null && snapshot(form.value) !== baseline.value)
+/** 正在新建时，新接口在树里的位置（跟着表单里的所属文件夹走） */
+const draftFolderId = computed<number | null | undefined>(() => (isNew.value ? (form.value?.folderId ?? null) : undefined))
 
 // 列表第一次加载完成时自动打开第一个，页面打开就有东西可看
 watch(items, (list) => {
@@ -35,6 +106,7 @@ function open(api: ApiDef): void {
   selectedId.value = api.id
   form.value = fromApi(api)
   baseline.value = snapshot(form.value)
+  currentFolderId.value = api.folderId ?? null
 }
 
 async function guard(): Promise<boolean> {
@@ -48,11 +120,12 @@ async function select(api: ApiDef): Promise<void> {
   open(api)
 }
 
-async function create(): Promise<void> {
+async function create(folderId: number | null): Promise<void> {
   if (!(await guard())) return
   selectedId.value = null
-  form.value = emptyForm()
+  form.value = emptyForm(folderId)
   baseline.value = snapshot(form.value)
+  currentFolderId.value = folderId
 }
 
 async function duplicate(): Promise<void> {
@@ -65,10 +138,15 @@ async function duplicate(): Promise<void> {
   baseline.value = '' // 副本一开始就算有改动，提醒保存
 }
 
+const importFolderId = ref<number | null>(null)
+function openImport(folderId: number | null): void {
+  importFolderId.value = folderId
+  importVisible.value = true
+}
 async function onImported(result: CurlImport): Promise<void> {
   if (!(await guard())) return
   selectedId.value = null
-  form.value = fromApi(result.input)
+  form.value = fromApi({ ...result.input, folderId: importFolderId.value })
   baseline.value = ''
   ElMessage.success(`已填入 ${result.input.method} ${result.input.path}，改好名字后保存`)
 }
@@ -122,12 +200,18 @@ async function del(): Promise<void> {
       <ApiList
         class="workbench-list"
         :items="items"
+        :folders="folders"
         :selected-id="selectedId"
-        :draft-new="isNew"
+        :draft-folder-id="draftFolderId"
+        :current-folder-id="currentFolderId"
         :loading="loading"
         @select="select"
+        @select-folder="selectFolder"
         @create="create"
-        @import="importVisible = true"
+        @import="openImport"
+        @create-folder="createFolder"
+        @rename-folder="renameFolder"
+        @delete-folder="deleteFolder"
       />
       <section class="workbench-main">
         <ApiEditor
@@ -136,12 +220,13 @@ async function del(): Promise<void> {
           :is-new="isNew"
           :dirty="dirty"
           :saving="saving"
+          :folder-options="folderSelectOptions"
           @save="save"
           @duplicate="duplicate"
           @delete="del"
         />
         <div v-else class="workbench-empty">
-          <p>选择左侧的接口，或点“新建”。</p>
+          <p>选择左侧的接口，或点“新建”。接口多了可以先建文件夹，按项目、模块分组。</p>
           <p class="muted">也可以把浏览器开发者工具里“复制为 cURL”的命令粘进来，直接生成接口。</p>
         </div>
       </section>

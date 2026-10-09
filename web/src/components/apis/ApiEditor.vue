@@ -6,6 +6,7 @@ import type { ExtractFrom } from '../../api'
 import { useDebug } from '../../composables/useDebug'
 import { useDebugContext } from '../../composables/useDebugContext'
 import { toInput, type ApiForm } from '../../utils/api-form'
+import type { FolderOption } from '../../utils/folders'
 import { buildCurl } from '../../utils/curl'
 import { tryPrettyJson } from '../../utils/debug'
 import { formatMs } from '../../utils/format'
@@ -21,7 +22,7 @@ import EnvPicker from '../debug/EnvPicker.vue'
 // 接口工作台：请求栏（方法、被测环境 + 路径、发送、保存）、请求标签页（含调试变量）、响应面板。
 // 发送的是正在编辑的内容，不要求先保存。
 const form = defineModel<ApiForm>({ required: true })
-defineProps<{ isNew: boolean; dirty: boolean; saving: boolean }>()
+defineProps<{ isNew: boolean; dirty: boolean; saving: boolean; folderOptions: FolderOption[] }>()
 const emit = defineEmits<{ save: []; duplicate: []; delete: [] }>()
 
 const ctx = useDebugContext()
@@ -153,6 +154,18 @@ async function copyCurl(): Promise<void> {
   <div class="editor">
     <div class="editor-head">
       <el-input v-model="form.name" class="name-input" placeholder="接口名称，例如：查询订单" maxlength="100" />
+      <el-tree-select
+        v-model="form.folderId"
+        :data="folderOptions"
+        check-strictly
+        default-expand-all
+        clearable
+        :value-on-clear="null"
+        placeholder="根目录"
+        class="folder-select"
+        title="所属文件夹"
+        :disabled="!folderOptions.length"
+      />
       <span v-if="dirty" class="unsaved">未保存</span>
       <div class="editor-actions">
         <el-button text :icon="DocumentCopy" @click="copyCurl">复制为 cURL</el-button>
@@ -296,6 +309,10 @@ async function copyCurl(): Promise<void> {
 .name-input :deep(.el-input__inner) {
   font-size: 16px;
   font-weight: 600;
+}
+.folder-select {
+  width: 200px;
+  flex-shrink: 0;
 }
 .unsaved {
   flex-shrink: 0;

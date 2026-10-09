@@ -89,11 +89,21 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   - 每项为正数或 `null`，`null` 表示不限制。
   - `type` 为 `prod` 时三项都必填（不能为 `null`）；其他类型可以留空。
 
+**文件夹 `/api/folders`**（接口的分组，可嵌套，例如"项目 → 模块"；2026-10-09 加入）
+
+```json
+{ "id": 3, "name": "订单模块", "parentId": 1, "note": "" }
+```
+
+- `parentId`：上级文件夹的 id，`null` 表示顶层。不能是自己或自己的子孙（PUT 时后端据路径里的 id 校验，返回 400）
+- 非空的文件夹（还有子文件夹或接口）不能删除，返回 409 并逐条列出
+- 文件夹只用于页面上的分组，不进 plan.json，也不影响运行
+
 **接口 `/api/apis`**
 
 ```json
 {
-  "id": 1, "name": "百度首页", "method": "GET", "path": "/",
+  "id": 1, "folderId": null, "name": "百度首页", "method": "GET", "path": "/",
   "headers": {}, "body": null,
   "expectStatus": 200, "expectBodyContains": "百度",
   "extracts": [ { "var": "token", "from": "json", "expr": "data.token" } ],
@@ -101,6 +111,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 }
 ```
 
+- `folderId`：所属文件夹的 id，`null` 表示在根目录；指向不存在的文件夹返回 400。调试接口（§3.5）的内联 `api` 可以不带这个字段
 - `method`：`GET | POST | PUT | PATCH | DELETE`
 - `path`：以 `/` 开头，拼在环境的 `baseUrl` 后面
 - `body`：字符串或 `null`
