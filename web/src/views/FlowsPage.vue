@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { ArrowDown, ArrowUp, Delete, Plus } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowUp, Delete, Plus, VideoPlay } from '@element-plus/icons-vue'
 import { apisApi, flowsApi, type ApiDef, type Flow, type FlowInput } from '../api'
 import { useResourceList } from '../composables/useResourceList'
 import { showError } from '../utils/feedback'
 import PageHeader from '../components/PageHeader.vue'
+import FlowDebugDialog from '../components/debug/FlowDebugDialog.vue'
 
 const { items, loading, load, remove } = useResourceList(flowsApi, '业务流程')
 
@@ -35,6 +36,14 @@ function emptyForm(): FormState {
 }
 
 const dialogVisible = ref(false)
+
+// 试跑：用真实 k6 把流程跑一次迭代
+const debugVisible = ref(false)
+const debugFlow = ref<Flow | null>(null)
+function openDebug(row: Flow): void {
+  debugFlow.value = row
+  debugVisible.value = true
+}
 const editingId = ref<number | null>(null)
 const saving = ref(false)
 const formRef = ref<FormInstance>()
@@ -132,14 +141,17 @@ async function save(): Promise<void> {
           </template>
         </el-table-column>
         <el-table-column prop="note" label="备注" min-width="160" show-overflow-tooltip />
-        <el-table-column label="操作" width="130" fixed="right">
+        <el-table-column label="操作" width="190" fixed="right">
           <template #default="{ row }">
+            <el-button link type="primary" :icon="VideoPlay" @click="openDebug(row as Flow)">试跑</el-button>
             <el-button link type="primary" @click="openEdit(row as Flow)">编辑</el-button>
             <el-button link type="danger" @click="remove(row as Flow)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
     </div>
+
+    <FlowDebugDialog v-model="debugVisible" :flow="debugFlow" />
 
     <el-dialog
       v-model="dialogVisible"

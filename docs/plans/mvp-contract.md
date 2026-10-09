@@ -1,6 +1,6 @@
 # MVP 契约：三方接口约定
 
-> 日期：2026-09-30 ｜ 适用：MVP（`docs/plans/mvp-plan.md`）
+> 日期：2026-09-30，2026-10-09 加入调试（§3.5、§4 `debug`、§5.1）｜ 适用：MVP（`docs/plans/mvp-plan.md`）
 > 本文是执行引擎（`perf/`）、后端（`server/`）、前端（`web/`）之间的**唯一约定**。三方并行开发，任何一方发现约定不够用或有问题，先改本文，再改代码。
 
 ---
@@ -265,6 +265,93 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 | `GET /api/system` | `{ "k6Version": "v2.3.0", "pythonVersion": "3.12.2", "dashboardPort": 5665, "runningRunId": null }`（`dashboardPort` 仅供排查，前端不使用） |
 | `GET /api/overview` | `{ "counts": { "environments": 1, "apis": 1, "flows": 1, "profiles": 3, "tests": 1, "executors": 1, "runs": 12 }, "verdicts": { "passed": 8, "failed": 2, "invalid": 1, "error": 0, "aborted": 1 }, "recentRuns": [运行列表项 × 最近 10 条], "runningRunId": null }` |
 
+### 3.5 调试 `/api/debug`
+
+调试 = 用真实 k6 把一个接口或一个业务流程**跑一次迭代**（1 并发、1 次迭代），把每一步实际发出的请求、收到的响应、检查结果和提取到的变量原样返回给页面。它走的是和压测完全相同的执行代码（`perf/core/interp.js`），所以调试里看到的变量替换、请求头合并、检查和提取结果，就是压测时会发生的事。
+
+| 方法与路径 | 说明 |
+|---|---|
+| `POST /api/debug` | 同步执行，k6 退出后才返回（通常 1–3 秒；最长 90 秒）。成功返回 200 和调试结果 |
+
+请求体（`api` 和 `flowId` **恰好给一个**）：
+
+```json
+{
+  "envId": 1,
+  "confirmProd": true,
+  "vars": { "token": "abc" },
+  "api": { "name": "查订单", "method": "GET", "path": "/api/orders/{{orderId}}", "headers": {}, "body": null,
+           "expectStatus": 200, "expectBodyContains": null, "extracts": [], "note": "" },
+  "flowId": 3
+}
+```
+
+- `envId`：被测环境，必填。请求发往它的 `baseUrl`，并带上它的公共请求头
+- `confirmProd`：被测环境类型为 `prod` 时必须为 `true`（一次请求也是请求，和发起运行的规则一致）
+- `vars`：可选，初始变量（值必须是字符串）。调试单个接口时用它给 `{{变量}}` 赋值；试跑流程时作为迭代开始前的初值，会被后续步骤提取到的同名变量覆盖
+- `api`：一份接口定义（字段同 §3.1 的接口，**不要求已保存**，页面上正在编辑的内容可以直接发），按单步流程执行；校验失败返回 400，`details` 和保存接口时一致
+- `flowId`：已保存的业务流程，按它的步骤顺序执行
+
+调试和运行的差别（除此以外行为一致）：
+
+| 项 | 运行 | 调试 |
+|---|---|---|
+| 负载 | 负载配置 | 固定 1 并发、1 次迭代，最长时长取 60 秒与被测环境 `maxDurationSec` 中的小者 |
+| 等待时间 `thinkTimeMs` | 等待 | **不等待** |
+| 响应体 | 用不到时不保留 | 保留，最多 64 KB（`bodyTruncated` 标出被截断） |
+| 某一步检查不通过 | 本次迭代余下步骤不执行 | 同样不执行，余下步骤以 `status: "skipped"` 返回 |
+| 阈值、判定、Run Record、运行记录、产物、仪表盘、执行机采样 | 有 | **都没有**。调试不进运行列表，产物目录读完即删 |
+| 与其他运行的关系 | 同一时间 1 个 | 有运行在进行时不能调试（409）；调试进行中不能发起运行（409）；同一时间只允许 1 个调试 |
+
+响应（200）：
+
+```json
+{
+  "debugId": "dbg-20261009T062206Z-6abec2",
+  "ok": true,
+  "env": { "id": 1, "name": "百度（仅冒烟）", "type": "prod", "baseUrl": "https://www.baidu.com" },
+  "source": { "kind": "api", "name": "百度首页" },
+  "durationMs": 812,
+  "exitCode": 0,
+  "steps": [
+    {
+      "key": "f1s1", "name": "百度首页", "status": "passed",
+      "request": { "method": "GET", "url": "https://www.baidu.com/", "headers": { "User-Agent": "Mozilla/5.0 k6-mvp" }, "body": null },
+      "response": {
+        "status": 200, "statusText": "200 OK", "finalUrl": "https://www.baidu.com/",
+        "headers": { "Content-Type": "text/html; charset=utf-8" }, "contentType": "text/html; charset=utf-8",
+        "bodyLength": 227310, "body": "<!DOCTYPE html>…", "bodyTruncated": true, "bodyOmitted": false
+      },
+      "timings": { "durationMs": 120.3, "blockedMs": 1.2, "lookingUpMs": 0.4, "connectingMs": 10.1, "tlsMs": 20.5,
+                   "sendingMs": 0.1, "waitingMs": 80.2, "receivingMs": 9.4 },
+      "error": null,
+      "checks": [ { "name": "[f1s1] 状态码为 200", "ok": true }, { "name": "[f1s1] 响应包含「百度」", "ok": true } ],
+      "extracted": [ { "var": "word", "from": "json", "expr": "q", "ok": true, "value": "k6" } ],
+      "vars": { "word": "k6" }
+    }
+  ],
+  "vars": { "word": "k6" }
+}
+```
+
+- `ok`：所有步骤 `status` 都是 `passed`
+- `source`：调试的对象。`{ "kind": "api", "name" }` 或 `{ "kind": "flow", "id", "name" }`
+- `durationMs`：后端从启动 k6 到它退出的墙钟时间（含 k6 启动开销，不是响应时间）；`exitCode`：k6 退出码（调试不评估阈值，正常为 0）
+- `steps[]` 的结构就是引擎写出的调试记录（§5.1），后端不改内容；`vars` 是迭代结束时的全部变量
+- `steps[].status`：`passed`（全部检查通过）、`failed`（有检查未通过；网络错误、超时也算在内，因为状态码检查不会通过）、`skipped`（前面有步骤失败，这一步没有执行，`request`、`response`、`timings` 为 `null`）、`error`（执行这一步时脚本抛出异常，例如地址非法，`error` 为异常文字，`response` 为 `null`）
+- `response.body`：文本。`contentType` 不像文本（不是 `text/*`、JSON、XML、JavaScript、表单编码）时不返回正文，`bodyOmitted` 为 `true`、`body` 为 `null`；超过 64 KB 时截断，`bodyTruncated` 为 `true`。`bodyLength` 是截断前的字符数
+- `timings` 单位毫秒，对应 k6 的 `res.timings`（`duration` = 发出请求到收完响应，不含 `blocked`）
+- `request` 是这一步实际发出的第一个请求（变量已替换、请求头已和环境合并）；有重定向时 `response.finalUrl` 是最后一跳的地址，状态码和响应体也是最后一跳的
+
+错误：
+
+| HTTP 状态 | code | 场景 |
+|---|---|---|
+| 400 | `VALIDATION_FAILED` | 字段缺失、`api` 与 `flowId` 不是恰好一个、`vars` 的值不是字符串、`api` 定义不合法（`details` 逐条） |
+| 422 | `PREFLIGHT_REJECTED` | 被测环境或流程不存在、流程没有步骤、步骤引用的接口不存在、`baseUrl` 非法、生产环境没有 `confirmProd: true`、k6 不存在 |
+| 409 | `CONFLICT` | 有运行在进行中，或上一次调试还没结束 |
+| 500 | `DEBUG_FAILED` | k6 没有产出调试记录（脚本异常、plan 无效、超时）。`details` 是 k6 日志的最后若干行，页面原样显示 |
+
 ## 4. plan.json（后端 → k6）
 
 后端把发起时的测试、流程、接口、负载配置、环境**展开成一份自包含的 plan**，写到 `results/<runId>/plan.json`，同时作为运行的 `snapshot` 存库。
@@ -296,6 +383,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 - `flows[].key`：`f<序号>`；`steps[].key`：`<flowKey>s<序号>`。只用 ASCII，因为要作为 k6 的 scenario 名和 tag 值
 - `weight` 已归一化，和为 1
+- `debug`（可选，只有调试时有，见 §3.5）：`{ "vars": { "token": "abc" }, "bodyLimit": 65536 }`。存在时引擎进入**调试模式**：不等待 `thinkTimeMs`；每一步都保留响应体（最多 `bodyLimit` 个字符）；逐步记录请求、响应、检查和变量；迭代结束后把记录写到 console（§5.1）；`handleSummary` 不写 `run-record.json` 和 `k6-summary.json`。调试的 plan 里 `test.id` 为 `0`、`profile.id` 为 `0`、`profile.name` 为"调试"，`profile.config` 固定为 `{ "vus": 1, "iterations": 1, "maxDurationSec": N }`，`slo` 四项都为 `null`；`runId` 形如 `dbg-20261009T062206Z-6abec2`
 
 ### 启动 k6 的方式（后端负责）
 
@@ -314,6 +402,22 @@ k6 run perf/runner.js \
 - **实时仪表盘不能给浏览器用**：联调实测，只要有浏览器连着 `:5665`，k6 跑完后就不会退出（它等页面关闭），也不写 `run-record.json`，运行会一直停在"运行中"。所以仪表盘只监听 `127.0.0.1`，页面上不嵌入也不链接它；运行中的进度由运行对象的 `progress` 字段提供，结束后的图表用导出的 `dashboard.html`
 - 仪表盘的环境变量名已在 k6 v2.3.0 实测有效。运行期间监听 `*:5665`，页面在 `/ui/`（访问 `/` 会跳转过去）；k6 退出后端口随之关闭
 - `K6_WEB_DASHBOARD_PERIOD`（聚合周期）默认 10s。不设置时，几秒到十几秒的短运行会因为数据点不够而**跳过 HTML 导出**（日志里有一条 warning，退出码不受影响）；设为 `1s` 后，3 秒的运行也能导出。即便如此，`dashboard.html` 仍应当作可选产物处理（运行太短或启动失败时不存在）
+
+### 启动调试的方式（后端负责）
+
+```bash
+K6_WEB_DASHBOARD=false \
+k6 run perf/runner.js \
+  -e PLAN_FILE=<调试目录>/plan.json \
+  -e OUTPUT_DIR=<调试目录> \
+  --no-thresholds --no-usage-report --quiet \
+  --log-format=json --console-output=<调试目录>/debug-console.log
+```
+
+- 调试目录是 `results/_debug/<debugId>/`，k6 退出、后端读完记录后整个删除；服务启动时清掉上次遗留的
+- 不开仪表盘，不设 `testid` tag，不评估阈值（`--no-thresholds`，所以退出码正常为 0；107 仍表示 plan 无效或脚本异常）
+- `--console-output` 把脚本里 `console.log` 的内容单独写到一个文件，`--log-format=json` 让每行是一个 JSON 对象（`msg` 字段是原文），后端从这个文件取调试记录（§5.1）；标准输出和标准错误仍写 `k6.log`，只在失败时用来给出原因
+- 超时：k6 90 秒还没退出就发一次 SIGINT，再等 10 秒不退就强杀，返回 500 `DEBUG_FAILED`
 
 ## 5. 运行产物（k6 → 后端）
 
@@ -356,6 +460,24 @@ k6 run perf/runner.js \
 - 没有样本时用 `null` 而不是 0：某个步骤一次请求都没发出（例如前一步的检查没通过，本次迭代提前结束）时，该步骤的 `count` 为 0，`avg / p50 / p95 / p99 / max / errorRate` 为 `null`；整个运行没有发出任何请求时，`overall` 里的时间类字段和 `errorRate`、`checksRate` 同样为 `null`
 - `steps[].count` 是这一步发出的 HTTP 请求数；被自动跟随的重定向每一跳各算一次
 - `k6Verdict`：只根据阈值得出。任一 `validity` 不通过 → `invalid`；否则任一 `slo` 不通过 → `failed`；否则 `passed`
+
+### 5.1 调试记录（k6 → 后端，只在调试模式）
+
+plan 带 `debug` 时，引擎在**迭代结束时**（无论成功、失败还是中途异常）执行一次：
+
+```js
+console.log(JSON.stringify({ debugTrace: { steps: [...], vars: {...} } }))
+```
+
+经 `--console-output` + `--log-format=json`，文件里是一行 `{"level":"info","msg":"{\"debugTrace\":…}","source":"console","time":"…"}`；后端取最后一行含 `debugTrace` 的 `msg` 解析。`steps[]` 每项的字段见 §3.5 的响应示例，要点：
+
+- 顺序和 plan 里的步骤一致，每个步骤恰好一项；没执行到的以 `status: "skipped"` 出现
+- `checks[].name` 和压测时写进 k6 `checks` 指标的名称相同（`[步骤 key] 状态码为 200` 等）
+- `extracted[]` 每条提取规则一项：`ok` 表示取到了值；`value` 是存进变量的字符串（对象会被 `JSON.stringify`），没取到为 `null`
+- `vars` 是这一步之后的全部变量快照；最外层的 `vars` 是迭代结束时的
+- 调试模式下 `handleSummary` 返回空对象：不写 `run-record.json`、`k6-summary.json`，也不打印摘要
+
+为什么用 console 而不是 `handleSummary`：k6 在独立的运行时里执行 `handleSummary`，VU 里给模块变量赋的值它看不到；VU 代码也不能写文件。console 是 VU 把一段结构化数据交给外界的唯一通道。
 
 ### 后端补全为最终 Run Record
 

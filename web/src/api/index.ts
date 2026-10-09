@@ -4,6 +4,8 @@ import type {
   ApiDef,
   ApiDefInput,
   ArtifactName,
+  DebugInput,
+  DebugResult,
   Environment,
   EnvironmentInput,
   Executor,
@@ -81,6 +83,11 @@ export const runsApi = {
   /** 以文本方式读取产物（如 k6.log）。 */
   artifactText: (runId: string, name: ArtifactName) =>
     requestText(`${runPath(runId)}/artifacts/${encodeURIComponent(name)}`),
+}
+
+/** 调试：用真实 k6 把一个接口或一个流程跑一次迭代（契约 §3.5）。同步返回，最长约 90 秒。 */
+export const debugApi = {
+  run: (input: DebugInput) => request<DebugResult>('POST', '/debug', { body: input }),
 }
 
 export const systemApi = {

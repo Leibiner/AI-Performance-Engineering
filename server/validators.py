@@ -25,7 +25,7 @@ ENV_LIMITS = (
 )
 EXTRACT_FROM = ("json", "regex", "header")
 SLO_KEYS = ("p95Ms", "p99Ms", "errorRate", "checksRate")
-_VAR_RE = re.compile(r"^\w+$")
+VAR_NAME_RE = re.compile(r"^\w+$")  # 变量名：字母、数字、下划线（接口的提取规则、调试的初始变量共用）
 
 
 def is_num(v: Any) -> bool:
@@ -198,7 +198,7 @@ def validate_api(data: Any, conn: sqlite3.Connection) -> dict:
                 continue
             var, source, expr = item.get("var"), item.get("from"), item.get("expr")
             ok = True
-            if not isinstance(var, str) or not _VAR_RE.match(var):
+            if not isinstance(var, str) or not VAR_NAME_RE.match(var):
                 c.err(f"extracts 第 {i} 项的 var（变量名）必填，只能包含字母、数字、下划线")
                 ok = False
             elif var in seen:

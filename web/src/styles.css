@@ -275,3 +275,17 @@ body {
   font-size: 13px;
   line-height: 1.6;
 }
+
+/* "复制为 cURL" 无法写剪贴板时，在对话框里显示命令 */
+.curl-text {
+  max-height: 360px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 6px;
+  background: #f4f5f7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

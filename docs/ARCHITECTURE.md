@@ -1,7 +1,7 @@
 # AI Performance Engineering：架构与总体说明
 
 > 本文是项目**唯一**的架构与总体说明文档。其他文档都是它的支撑材料（见 §13 文档分层）。
-> 更新日期：2026-09-30 ｜ k6 基线：v2.3.0 ｜ 当前阶段：**MVP 已完成并可运行**（管理控制台 + 后端 + k6 执行引擎；决策见 ADR-005）
+> 更新日期：2026-10-09 ｜ k6 基线：v2.3.0 ｜ 当前阶段：**MVP 已完成并可运行**（管理控制台 + 后端 + k6 执行引擎；决策见 ADR-005）
 > 标注约定：**已实现** = 代码里有并且跑过；**规划，未实现** = Phase 0 的设计仍然有效，但还没有代码；**待重新设计** = 原设计的前提已被 MVP 改变，动手前要先重新设计。
 
 ---
@@ -17,6 +17,7 @@
 | 在页面上维护定义：被测环境（含类型 dev / test / staging / prod）、接口、业务流程、负载配置、测试（含验收标准） | ✅ 已实现（MVP） | 增删改查，存 SQLite（§8.2） |
 | 执行机（运行 k6 的机器）：查看主机、系统、资源、k6 / Python / uv 版本、项目目录、当前状态 | ✅ 已实现（MVP） | 只有运行后端的这一台；只能改名称和备注（§3.5） |
 | 从页面发起、停止运行 | ✅ 已实现（MVP） | 同一时间只允许 1 个运行（§3.5） |
+| 接口调试、业务流程试跑：用真实 k6 跑一次迭代，页面上看请求、响应、检查和变量；接口页为 Postman 式工作台；从 cURL 导入 | ✅ 已实现（2026-10-09） | 与压测共用执行代码；不留运行记录；与运行互斥（§3.5 调试） |
 | 预检：定义完整、地址合法、负载形态合法、不超过被测环境的安全上限、生产环境二次确认、k6 可用 | ✅ 已实现（MVP） | 目标健康检查、k6 版本核对未实现 |
 | 数据驱动的业务流程执行（HTTP；多步骤、变量提取、检查、等待时间） | ✅ 已实现（MVP） | 通用脚本 `perf/runner.js` 解释执行；没有分支和循环（§1.2） |
 | 同一个测试用不同负载配置运行；显式 open / closed；4 种形态 | ✅ 已实现（MVP） | 对百度只跑过冒烟级别 |
@@ -314,6 +315,21 @@ stateDiagram-v2
 | 到达率必须是整数 | 小数到达率用 `timeUnit` 换算（每秒 0.5 次 → 每 2 秒 1 次），拆分后的总量不超过设定值 |
 
 **没有的护栏**（风险见 §8.5）：登录与权限；安全上限和环境类型本身可以在页面上修改；没有目标地址白名单；没有运行之间的冷却时间；没有后端的超时看门狗（时长靠 k6 executor 自己的设定）；没有 `abortOnFail` 之类的失控保护；环境和接口的请求头原样存入数据库、`plan.json` 和运行快照，**没有凭据管理，不要在里面放真实密钥**。
+
+#### 调试（单次试跑）
+
+页面上写完接口不知道对不对，以前只能建流程、建测试、发起一次正式运行再去看检查通过率。现在接口页和业务流程页都能**调试**：用真实 k6 把一个接口（可以是没保存的内容）或一个业务流程跑**一次迭代**，把每一步实际发出的请求、收到的响应、每条检查的结果和提取到的变量原样返回给页面。字段级约定见 `plans/mvp-contract.md` §3.5、§4 `debug`、§5.1。
+
+| 项 | 做法 | 为什么 |
+|---|---|---|
+| 谁发请求 | **k6 自己**：后端把接口 / 流程组装成 1 并发、1 次迭代、带 `debug` 段的 plan，用 `perf/runner.js` 的调试模式跑 | 变量替换、请求头合并、检查、提取只有 `perf/core/interp.js` 一份实现。后端若用 Python 直接发请求，就会出现"调试通过、压测失败"的第二套语义 |
+| 记录怎么出来 | 引擎在迭代结束时 `console.log` 一行 JSON，k6 以 `--console-output` 单独落盘、`--log-format=json` 保证可解析，后端读回 | k6 在独立运行时里执行 `handleSummary`，看不到 VU 里的变量；VU 代码也不能写文件 |
+| 与运行的差别 | 不等待 `thinkTimeMs`；保留响应体（≤ 64 KB）；`--no-thresholds`，没有判定、Run Record、运行记录、仪表盘、执行机采样；目录 `results/_debug/<debugId>/` 读完即删 | 调试回答的是"这一步会发生什么"，不是"系统达不达标" |
+| 与运行互斥 | 有运行在进行时不能调试（409）；调试进行中不能发起运行（409）；同一时间只允许 1 个调试。实现在 `server/runs.py`（`claim_debug_slot` / `release_debug_slot`，与运行共用同一把启动锁） | 不干扰正在进行的运行的目标负载和执行机采样 |
+| 护栏 | 走和运行相同的被测环境：`baseUrl`、公共请求头、`maxDurationSec`（取 60 秒与它的小者）；生产环境同样要 `confirmProd: true`（页面上是一个常驻的勾选，换环境后要重新勾） | 一次请求也是请求；对百度的约束不因"只是调试"而放松 |
+| 失败时 | k6 没产出记录（plan 无效、脚本异常、超时 90 秒）返回 500 `DEBUG_FAILED`，`details` 是 k6 日志的末尾，页面原样显示 | 常见原因是提取规则里的正则写错，日志里能直接看到 |
+
+某一步的检查没通过时，后面的步骤和压测时一样不执行，但会以 `skipped` 列出来，页面上看得出"从哪一步开始没跑"。
 
 ### 3.6 监控
 
@@ -718,7 +734,8 @@ AI-Performance-Engineering/
 │   ├── resources.py              5 类定义的统一增删改查、引用保护
 │   ├── validators.py             字段校验、负载配置的四种形态、被测环境类型和安全上限
 │   ├── executors.py              执行机：/api/executors、本机信息实时采集、运行期间的 CPU / 内存采样
-│   ├── runs.py                   预检、组装 plan、启动 / 停止 k6、最终判定、Run Record、产物
+│   ├── runs.py                   预检、组装 plan、启动 / 停止 k6、最终判定、Run Record、产物；调试与运行互斥的槽位
+│   ├── debug.py                  调试：组 1 并发 1 迭代的 plan、以调试模式跑 k6、读回调试记录（契约 §3.5）
 │   ├── system.py                 /api/system、/api/overview、环境指纹
 │   ├── seed.py                   种子数据（只在全新的库里写一次）
 │   ├── errors.py                 统一的错误响应
@@ -729,6 +746,8 @@ AI-Performance-Engineering/
 │   └── src/
 │       ├── views/                9 个页面：Overview / Executors / Environments / Apis / Flows / Profiles / Tests / Runs / RunDetail
 │       ├── components/           RunDialog、VerdictTag、StatusTag、EnvTypeTag、ThresholdTable、StepLatencyChart、KeyValueEditor、PageHeader
+│       │   ├── apis/             接口工作台：ApiList（左栏）、ApiEditor（请求栏 + 标签页 + 响应面板）、CurlImportDialog
+│       │   └── debug/            调试：DebugContextBar（环境 / 变量 / 生产确认）、DebugStepPanel（一步的响应）、DebugErrorView、FlowDebugDialog（流程试跑）
 │       ├── api/                  唯一的数据访问层：http.ts、types.ts（与契约对应）、index.ts
 │       ├── composables/          useResourceList、useStartRun（含生产环境二次确认）
 │       ├── utils/                格式化、判定的显示、负载配置和 SLO 的描述
@@ -919,8 +938,8 @@ k6 inspect perf/runner.js -e PLAN_FILE=<plan.json 的绝对路径>
 | 概览 | `/` | 各类定义、执行机和运行的数量、判定分布、最近 10 次运行 | `GET /api/overview` |
 | 执行机 | `/executors` | 查看运行 k6 的机器：主机名、IP、系统、CPU、内存、负载、磁盘、k6 / Python / uv 版本、项目目录、当前状态；只能改名称和备注。运行中时每 3 秒刷新 | `/api/executors` |
 | 被测环境 | `/environments` | 增删改查：名称、类型（开发 / 测试 / 预发 / 生产）、基础地址、公共请求头、安全上限（最大并发、最大到达率、最长时长；生产必填，其他类型留空表示不限制） | `/api/environments` |
-| 接口 | `/apis` | 增删改查：方法、路径、请求头、请求体、期望状态码、期望包含的文本、变量提取 | `/api/apis` |
-| 业务流程 | `/flows` | 增删改查：按顺序排列接口步骤，设置每步的等待时间 | `/api/flows` |
+| 接口 | `/apis` | Postman 式工作台：左栏列表（搜索、新建、从 cURL 导入），右栏编辑器：方法、路径（前面显示所选被测环境的地址，拼成一条完整地址）、Query 参数（与路径里的 `?` 双向同步）、请求头、请求体（JSON 格式化）、期望、变量提取、备注；选被测环境后**发送**一次（发送的是正在编辑的内容，不必先保存），响应面板显示状态码、耗时、大小、响应体（JSON 美化）、响应头、检查、变量、实际请求、耗时分解；复制接口、复制为 cURL；未保存有提示 | `/api/apis`、`POST /api/debug` |
+| 业务流程 | `/flows` | 增删改查：按顺序排列接口步骤，设置每步的等待时间；**试跑**：选被测环境后跑一次迭代，逐步显示请求、响应、检查、变量，失败后未执行的步骤标为未执行 | `/api/flows`、`POST /api/debug` |
 | 负载配置 | `/profiles` | 增删改查：类型标签、open / closed、四种形态的参数 | `/api/profiles` |
 | 测试 | `/tests` | 增删改查：选择流程和权重、设置验收标准；显示最近一次运行；**发起运行**（选负载配置和被测环境，显示执行机，对照安全上限；被测环境是生产时要二次确认） | `/api/tests`、`POST /api/runs` |
 | 运行列表 | `/runs` | 按测试 / 判定 / 状态 / 存档筛选，分页；列：开始时间、测试、负载配置、被测环境（带类型标签）、状态、判定、p95、错误率、请求数、备注；存档、删除 | `GET /api/runs`、`PATCH`、`DELETE` |
@@ -984,6 +1003,7 @@ flowchart LR
 | `GET / POST /api/<res>`，`GET / PUT / DELETE /api/<res>/:id` | 定义类资源统一的增删改查，`<res>` = `environments`、`apis`、`flows`、`profiles`、`tests`。`PUT` 整体替换；被引用的接口和流程删除时返回 409 |
 | `GET /api/executors`，`GET / PUT /api/executors/:id` | 执行机。目前恒为 1 项（本机），没有新增和删除；`PUT` 只能改名称和备注 |
 | `POST /api/runs` | 发起运行：`{testId, profileId, envId, executorId?, confirmProd?, note}`。`executorId` 省略时用本机执行机；被测环境是生产时必须带 `confirmProd: true`。成功返回 201；预检不通过 422；已有运行 409 |
+| `POST /api/debug` | 调试：`{envId, confirmProd?, vars?, api? \| flowId?}`，用真实 k6 跑一次迭代，同步返回每一步的请求、响应、检查、变量（契约 §3.5）。有运行在进行或上一次调试未结束 409；k6 没产出记录 500 `DEBUG_FAILED` |
 | `GET /api/runs?testId=&verdict=&status=&archived=&page=&pageSize=` | 运行列表，按开始时间倒序，返回 `{items, total}` |
 | `GET /api/runs/:runId` | 运行详情：含 `snapshot`、`record`、`artifacts`、`progress` |
 | `POST /api/runs/:runId/stop` | 停止正在进行的运行 |

@@ -62,9 +62,32 @@ class _Active:
         self.reason: str | None = None  # 非用户触发的中止原因（例如服务关闭）
 
 
-_start_lock = threading.Lock()  # 串行化“检查是否有运行 → 登记 → 启动”
+_start_lock = threading.Lock()  # 串行化“检查是否有运行 → 登记 → 启动”；调试占槽也走它
 _state_lock = threading.Lock()
 _active: _Active | None = None
+_debug_busy: str | None = None  # 正在进行的调试的 debugId（契约 §3.5：调试与运行互斥）
+
+
+# ---------- 调试与运行互斥 ----------
+
+def claim_debug_slot(debug_id: str) -> None:
+    """调试开始前调用：在 _start_lock 内确认没有运行、也没有别的调试在进行，然后占住调试槽位。不满足时抛 409。"""
+    global _debug_busy
+    with _start_lock:
+        with db.connect() as conn:
+            running = running_run_id(conn)
+        if running:
+            raise conflict(f"已有运行在进行中（{running}），运行结束前不能调试。请等它结束或先停止它")
+        if _debug_busy:
+            raise conflict("上一次调试还没有结束（通常只需几秒），请稍候再试")
+        _debug_busy = debug_id
+
+
+def release_debug_slot(debug_id: str) -> None:
+    global _debug_busy
+    with _start_lock:
+        if _debug_busy == debug_id:
+            _debug_busy = None
 
 
 def run_dir(run_id: str) -> Path:
@@ -561,6 +584,8 @@ def create_run(payload: Any = Body(...)):
             running = running_run_id(conn)
         if running:
             raise conflict(f"已有运行在进行中（{running}），同一时间只允许 1 个运行。请等它结束或先停止它")
+        if _debug_busy:
+            raise conflict("有调试正在进行（通常只需几秒），请等它结束后再发起运行")
         k6 = config.k6_bin()
         if k6 is None:
             raise ApiError(

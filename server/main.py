@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 
-from . import config, db, errors, executors, resources, runs, seed, system
+from . import config, db, debug, errors, executors, resources, runs, seed, system
 
 log = logging.getLogger("uvicorn.error")
 
@@ -24,6 +24,7 @@ async def lifespan(_: FastAPI):
         log.info("全新的数据库，已写入种子数据：%s", config.DB_PATH)
     db.mark_initialized()
     runs.recover_stale()
+    debug.cleanup_leftovers()
     log.info("数据库：%s ｜ 运行产物：%s ｜ k6：%s", config.DB_PATH, config.RESULTS_DIR, config.k6_bin() or "（未找到）")
     yield
     runs.shutdown()
@@ -50,6 +51,7 @@ app.add_middleware(
 for router in resources.routers:
     app.include_router(router)
 app.include_router(runs.router)
+app.include_router(debug.router)
 app.include_router(executors.router)
 app.include_router(system.router)
 

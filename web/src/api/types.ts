@@ -417,3 +417,103 @@ export interface Overview {
   recentRuns: RunListItem[]
   runningRunId: string | null
 }
+
+// ---------- 调试（契约 §3.5、§5.1） ----------
+
+export type DebugStepStatus = 'passed' | 'failed' | 'skipped' | 'error'
+
+/** 这一步实际发出的请求（变量已替换、请求头已和被测环境合并） */
+export interface DebugRequestInfo {
+  method: string
+  url: string
+  headers: Record<string, string>
+  body: string | null
+}
+
+export interface DebugResponseInfo {
+  /** 没有收到响应（连接失败等）时为 0 */
+  status: number
+  statusText: string | null
+  /** 有重定向时是最后一跳的地址 */
+  finalUrl: string | null
+  headers: Record<string, string>
+  contentType: string | null
+  /** 截断前的字符数 */
+  bodyLength: number
+  /** 不像文本（bodyOmitted）时为 null */
+  body: string | null
+  bodyTruncated: boolean
+  bodyOmitted: boolean
+}
+
+/** 单位毫秒，对应 k6 的 res.timings */
+export interface DebugTimings {
+  durationMs: number | null
+  blockedMs: number | null
+  lookingUpMs: number | null
+  connectingMs: number | null
+  tlsMs: number | null
+  sendingMs: number | null
+  waitingMs: number | null
+  receivingMs: number | null
+}
+
+export interface DebugCheck {
+  name: string
+  ok: boolean
+}
+
+export interface DebugExtracted {
+  var: string
+  from: ExtractFrom
+  expr: string
+  ok: boolean
+  value: string | null
+}
+
+export interface DebugStep {
+  key: string
+  name: string
+  status: DebugStepStatus
+  /** skipped / error 时为 null */
+  request: DebugRequestInfo | null
+  response: DebugResponseInfo | null
+  timings: DebugTimings | null
+  /** 网络错误、脚本异常、或 skipped 的原因 */
+  error: string | null
+  checks: DebugCheck[]
+  extracted: DebugExtracted[]
+  /** 这一步之后的全部变量 */
+  vars: Record<string, string>
+}
+
+/** api 和 flowId 恰好给一个 */
+export interface DebugInput {
+  envId: number
+  /** 被测环境类型为 prod 时必须为 true */
+  confirmProd?: boolean
+  /** 初始变量 */
+  vars?: Record<string, string>
+  /** 一份接口定义，不要求已保存 */
+  api?: ApiDefInput
+  flowId?: number
+}
+
+export interface DebugSource {
+  kind: 'api' | 'flow'
+  id?: number
+  name: string
+}
+
+export interface DebugResult {
+  debugId: string
+  /** 所有步骤都 passed */
+  ok: boolean
+  env: { id: number; name: string; type: EnvType; baseUrl: string }
+  source: DebugSource
+  /** 后端从启动 k6 到它退出的墙钟时间，不是响应时间 */
+  durationMs: number
+  exitCode: number | null
+  steps: DebugStep[]
+  vars: Record<string, string>
+}
