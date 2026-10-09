@@ -35,6 +35,8 @@
 | `k6 inspect` | 不发请求就能看到生成的 options，适合检查 plan 能否被引擎接受 | 2026-09-30 |
 | 失败时不空转 | 某一步 check 没通过时，本次迭代的后续步骤不再执行，但仍然等待 think time，避免失败后循环变快、流量意外变大 | 2026-09-30 |
 | 百度首页的特点 | 首页 `/` 返回 200 且包含"百度"；搜索路径 `/s` 会 302 到验证码页（`baseUrl` 以外的主机），不能用作示例 | 2026-09-30 |
+| k6 不编码 URL 里的中文 | `http.request` 把 URL 里的 UTF-8 原样发出，uvicorn（h11）直接回 400 `Invalid HTTP request received.`，请求根本到不了应用。引擎在发送前对最终 URL 做 `replace(/[^\x21-\x7E]/gu, encodeURIComponent)`：只编码非 ASCII 和空白，已有的 `%XX` 不会二次编码，`u` 标志按码点处理 emoji。在真实项目 test_port 上调试"搜索商品"时发现 | 2026-10-09 |
+| 期望文本支持变量 | `expectBodyContains` 原来按字面匹配，写 `{{username}}` 永远不通过。现在含 `{{` 时每次请求按当前变量渲染后再匹配，和 path / headers / body 一致 | 2026-10-09 |
 | 调试模式复用解释器 | plan 带 `debug` 段时，`compileStep` 强制 `responseType: 'text'`、`thinkSec: 0`；`runStep` 把每个 check 函数包一层记录单条结果（`check()` 只返回总的布尔值）；记录 push 进 trace。压测路径的代码不变 | 2026-10-09 |
 | `handleSummary` 看不到 VU 的变量 | k6 在独立的运行时里执行 `handleSummary`，VU 里给模块变量赋的值它看不到；VU 也不能写文件。调试记录改为迭代结束时 `console.log` 一行 JSON，用 `--console-output=<文件>` 单独落盘、`--log-format=json` 让每行是 `{level, msg, source, time}`，后端取 `msg` 再解析一次。实测带 64 KB 响应体的一行也完整 | 2026-10-09 |
 | 调试的 k6 参数 | `--no-thresholds` 不评估阈值（退出码恒为 0，107 仍表示 init 阶段异常）；`--quiet` 去掉进度条；`--no-usage-report` 省掉结束时的匿名统计上报；`K6_WEB_DASHBOARD=false` 不开仪表盘。1 次请求的调试从启动到退出约 65 ms（本机目标）到 600 ms（百度，含 TLS） | 2026-10-09 |

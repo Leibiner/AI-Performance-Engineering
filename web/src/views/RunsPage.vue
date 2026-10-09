@@ -147,46 +147,50 @@ onBeforeUnmount(() => {
       </div>
 
       <el-table v-loading="loading" :data="items" empty-text="没有符合条件的运行">
-        <el-table-column label="开始时间" width="160">
+        <el-table-column label="开始时间" width="172">
           <template #default="{ row }">
             <router-link class="run-link num" :to="`/runs/${row.runId}`">{{ formatTime(row.startedAt) }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="testName" label="测试" min-width="110" show-overflow-tooltip />
-        <el-table-column prop="profileName" label="负载配置" min-width="70" show-overflow-tooltip />
-        <el-table-column label="被测环境" min-width="140" show-overflow-tooltip>
+        <el-table-column label="测试 / 负载配置" min-width="190">
+          <template #default="{ row }">
+            <div class="cell-main" :title="row.testName">{{ row.testName }}</div>
+            <div class="cell-sub" :title="row.profileName">{{ row.profileName }}</div>
+          </template>
+        </el-table-column>
+        <el-table-column label="被测环境" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
             <EnvTypeTag :type="row.envType" class="env-tag" />{{ row.envName }}
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="78">
-          <template #default="{ row }"><StatusTag :status="row.status" /></template>
+        <el-table-column label="判定" width="104">
+          <template #default="{ row }">
+            <StatusTag v-if="row.status === 'running'" :status="row.status" />
+            <VerdictTag v-else :verdict="row.verdict" />
+          </template>
         </el-table-column>
-        <el-table-column label="判定" width="112">
-          <template #default="{ row }"><VerdictTag :verdict="row.verdict" /></template>
-        </el-table-column>
-        <el-table-column label="p95" width="92" align="right">
+        <el-table-column label="p95" width="84" align="right">
           <template #default="{ row }">
             <span class="num">{{ formatMs(row.summary?.p95) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="错误率" width="70" align="right">
+        <el-table-column label="错误率" width="76" align="right">
           <template #default="{ row }">
             <span class="num">{{ formatPercent(row.summary?.errorRate) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="请求数" width="70" align="right">
+        <el-table-column label="请求数" width="80" align="right">
           <template #default="{ row }">
             <span class="num">{{ formatCount(row.summary?.reqs) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="备注" min-width="60" show-overflow-tooltip>
+        <el-table-column label="备注" min-width="110" show-overflow-tooltip>
           <template #default="{ row }">
             <el-tag v-if="row.archived" type="warning" effect="plain" size="small" class="archived-tag">已存档</el-tag>
             {{ row.note }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="190" fixed="right">
+        <el-table-column label="操作" width="196" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="router.push(`/runs/${row.runId}`)">查看</el-button>
             <el-button link type="primary" @click="toggleArchive(row as RunListItem)">
@@ -255,5 +259,15 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 14px;
+}
+.cell-main,
+.cell-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cell-sub {
+  color: var(--ink-muted);
+  font-size: 12px;
 }
 </style>

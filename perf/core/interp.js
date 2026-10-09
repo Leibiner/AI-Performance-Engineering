@@ -25,6 +25,15 @@ function hasVar(s) {
   return typeof s === 'string' && s.indexOf('{{') !== -1;
 }
 
+/**
+ * 把 URL 里的非 ASCII 字符和空白按 UTF-8 百分号编码（和 Postman / Apifox 一致）。
+ * k6 不会替我们编码，原样发出去的中文 query 会被 uvicorn 等服务直接以 400 拒绝。
+ * 已经写好的 %XX 和 ASCII 符号原样保留，不会二次编码。
+ */
+export function encodeUrl(url) {
+  return url.replace(/[^\x21-\x7E]/gu, (c) => encodeURIComponent(c));
+}
+
 /** 合并请求头，名称不区分大小写，后者覆盖前者。 */
 function mergeHeaders(envHeaders, stepHeaders) {
   const out = {};
@@ -80,12 +89,14 @@ function compileStep(plan, flow, step) {
     method,
     urlTemplate: baseUrl + step.path,
     urlHasVar: hasVar(step.path),
+    urlStatic: encodeUrl(baseUrl + step.path),
     headers: merged.headers,
     headerVarNames: headerNames.filter((n) => hasVar(merged.headers[n])),
     body,
     bodyHasVar: hasVar(body),
     expected,
     contains,
+    containsHasVar: hasVar(contains),
     statusCheckName: `[${step.key}] 状态码为 ${expected.join(' / ')}`,
     containsCheckName: contains === null ? null : `[${step.key}] 响应包含「${short(contains, 30)}」`,
     extracts,
@@ -204,7 +215,7 @@ function describeError(res) {
  * 返回这一步的检查是否全部通过。
  */
 function runStep(step, vars, debug) {
-  const url = step.urlHasVar ? render(step.urlTemplate, vars) : step.urlTemplate;
+  const url = step.urlHasVar ? encodeUrl(render(step.urlTemplate, vars)) : step.urlStatic;
   let headers = step.headers;
   if (step.headerVarNames.length > 0) {
     headers = Object.assign({}, step.headers);
@@ -231,7 +242,9 @@ function runStep(step, vars, debug) {
   };
   add(step.statusCheckName, (r) => step.expected.indexOf(r.status) !== -1);
   if (step.contains !== null) {
-    add(step.containsCheckName, (r) => typeof r.body === 'string' && r.body.indexOf(step.contains) !== -1);
+    // 期望文本里也可以引用变量，例如期望响应里出现登录用的 {{username}}
+    const expected = step.containsHasVar ? render(step.contains, vars) : step.contains;
+    add(step.containsCheckName, (r) => typeof r.body === 'string' && r.body.indexOf(expected) !== -1);
   }
   const extracted = [];
   for (const ex of step.extracts) {

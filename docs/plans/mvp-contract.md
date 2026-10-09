@@ -119,7 +119,8 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 - `method`：`GET | POST | PUT | PATCH | DELETE`
 - `path`：以 `/` 开头，拼在环境的 `baseUrl` 后面
 - `body`：字符串或 `null`
-- `path`、`headers` 的值、`body` 中可以使用 `{{变量名}}`，运行时替换为之前步骤提取到的变量
+- `path`、`headers` 的值、`body`、`expectBodyContains` 中可以使用 `{{变量名}}`，运行时替换为环境变量或之前步骤提取到的变量
+- 发送前，引擎把最终 URL 里的非 ASCII 字符和空白按 UTF-8 百分号编码（`keyword=键盘` → `keyword=%E9%94%AE%E7%9B%98`），已有的 `%XX` 和 ASCII 符号不动；变量值里的 `&`、`/` 等不编码
 - `expectBodyContains`：字符串或 `null`
 - `extracts[].from`：`json`（`expr` 是点号路径，如 `data.items.0.id`）、`regex`（`expr` 是正则，取第 1 个捕获组）、`header`（`expr` 是响应头名称）
 
