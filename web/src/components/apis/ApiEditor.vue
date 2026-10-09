@@ -13,13 +13,14 @@ import type { KvRow } from '../../utils/kv'
 import { METHODS, METHOD_COLOR } from '../../utils/method'
 import { joinPath, splitPath } from '../../utils/query'
 import KeyValueEditor from '../KeyValueEditor.vue'
+import VarInput from '../VarInput.vue'
 import DebugErrorView from '../debug/DebugErrorView.vue'
 import DebugStepPanel from '../debug/DebugStepPanel.vue'
 import DebugVarsEditor from '../debug/DebugVarsEditor.vue'
 import EnvPicker from '../debug/EnvPicker.vue'
 
 const form = defineModel<ApiForm>({ required: true })
-defineProps<{ isNew: boolean; dirty: boolean; saving: boolean; folderOptions: FolderOption[] }>()
+defineProps<{ isNew: boolean; dirty: boolean; saving: boolean; folderOptions: FolderOption[]; producers: Record<string, string[]> }>()
 const emit = defineEmits<{ save: []; duplicate: []; delete: [] }>()
 
 const ctx = useDebugContext()
@@ -222,7 +223,7 @@ async function copyCurl(): Promise<void> {
       </el-select>
       <div class="url-box">
         <EnvPicker seamless class="url-env" />
-        <el-input v-model="form.path" class="url-path" placeholder="/api/orders/{{orderId}}?page=1" />
+        <VarInput v-model="form.path" class="url-path" seamless :vars="ctx.vars.value" :producers="producers" placeholder="/api/orders/{{orderId}}?page=1" />
       </div>
       <el-tooltip :content="sendBlocker ?? 'Ctrl + Enter'" placement="bottom">
         <span>
@@ -238,6 +239,7 @@ async function copyCurl(): Promise<void> {
       <el-tab-pane name="params">
         <template #label>参数<span v-if="queryCount" class="tab-count">{{ queryCount }}</span></template>
         <KeyValueEditor
+          :vars="ctx.vars.value" :producers="producers"
           :model-value="queryRows"
           key-placeholder="参数名"
           value-placeholder="值，可以用 {{变量名}}"
@@ -257,12 +259,14 @@ async function copyCurl(): Promise<void> {
               style="width: 34%"
               @update:model-value="setHeader(row, 'key', $event)"
             />
-            <el-input
-              :model-value="row.value"
-              class="grow"
-              placeholder="值，可用 {{变量名}}"
-              @update:model-value="setHeader(row, 'value', $event)"
-            />
+            <div class="grow">
+              <VarInput
+                :model-value="row.value"
+                :vars="ctx.vars.value" :producers="producers"
+                placeholder="值"
+                @update:model-value="setHeader(row, 'value', $event)"
+              />
+            </div>
             <span class="header-source">
               <el-tag
                 v-if="row.source !== 'own'"
@@ -295,7 +299,7 @@ async function copyCurl(): Promise<void> {
         <div class="body-tools">
           <el-button size="small" :disabled="!bodyIsJsonLike" @click="formatBody">格式化 JSON</el-button>
         </div>
-        <el-input v-model="form.body" type="textarea" :rows="8" class="mono" placeholder='{"orderId": "{{orderId}}"}' />
+        <VarInput v-model="form.body" multiline :rows="8" :vars="ctx.vars.value" :producers="producers" placeholder='{"orderId": "{{orderId}}"}' />
       </el-tab-pane>
 
       <el-tab-pane name="expect" label="期望">
@@ -304,7 +308,7 @@ async function copyCurl(): Promise<void> {
             <el-input-number v-model="form.expectStatus" :min="100" :max="599" :precision="0" controls-position="right" />
           </el-form-item>
           <el-form-item label="期望包含的文本">
-            <el-input v-model="form.expectBodyContains" placeholder="留空表示不检查响应内容" />
+            <VarInput v-model="form.expectBodyContains" :vars="ctx.vars.value" :producers="producers" placeholder="留空表示不检查响应内容" />
           </el-form-item>
         </el-form>
       </el-tab-pane>
@@ -430,16 +434,7 @@ async function copyCurl(): Promise<void> {
 .url-path {
   flex: 1;
   min-width: 0;
-  --el-input-border-color: transparent;
-  --el-input-hover-border-color: transparent;
-  --el-input-focus-border-color: transparent;
-}
-.url-path :deep(.el-input__wrapper) {
-  box-shadow: none !important;
-}
-.url-path :deep(.el-input__inner) {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
+  align-self: center;
 }
 .request-bar .el-button + .el-button {
   margin-left: 0;

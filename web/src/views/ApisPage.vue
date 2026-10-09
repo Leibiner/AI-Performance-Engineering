@@ -26,6 +26,12 @@ async function loadFolders(): Promise<void> {
 onMounted(loadFolders)
 const folderTree = computed(() => buildFolderTree(folders.value, items.value))
 const folderSelectOptions = computed(() => folderOptions(folderTree.value.roots))
+/** 变量名 → 提取它的接口名，编辑器据此区分"还没发送"和"没人定义" */
+const producers = computed(() => {
+  const out: Record<string, string[]> = {}
+  for (const api of items.value) for (const e of api.extracts ?? []) (out[e.var] ??= []).push(api.name)
+  return out
+})
 
 async function promptName(title: string, initial = ''): Promise<string | null> {
   try {
@@ -205,6 +211,7 @@ async function del(): Promise<void> {
           :dirty="dirty"
           :saving="saving"
           :folder-options="folderSelectOptions"
+          :producers="producers"
           @save="save"
           @duplicate="duplicate"
           @delete="del"
