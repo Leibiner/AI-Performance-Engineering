@@ -7,9 +7,10 @@ import EnvTypeTag from '../EnvTypeTag.vue'
 // seamless 时去掉边框，嵌进请求栏的地址框里。每次展开都重新拉一次列表，被测环境页上新建的马上能选。
 withDefaults(defineProps<{ seamless?: boolean }>(), { seamless: false })
 
-const { envId, environments, environment, loaded, loadEnvironments } = useDebugContext()
+const { envId, environments, environment, loadEnvironments } = useDebugContext()
+// 每次挂载都重新拉一次：从被测环境页改完回来，列表就是新的
 onMounted(() => {
-  if (!loaded.value) void loadEnvironments()
+  void loadEnvironments()
 })
 function onVisibleChange(open: boolean): void {
   if (open) void loadEnvironments()
@@ -35,15 +36,15 @@ const width = computed(() => {
   >
     <template #label>
       <span v-if="environment" class="env-picker-label">
-        <span class="env-picker-url">{{ environment.baseUrl }}</span>
         <EnvTypeTag :type="environment.type" />
+        <span class="env-picker-url">{{ environment.baseUrl }}</span>
       </span>
     </template>
     <el-option v-for="e in environments" :key="e.id" :label="e.name" :value="e.id">
       <span class="env-option">
+        <EnvTypeTag :type="e.type" />
         <span class="env-option-name">{{ e.name }}</span>
         <span class="env-option-url">{{ e.baseUrl }}</span>
-        <EnvTypeTag :type="e.type" />
       </span>
     </el-option>
   </el-select>

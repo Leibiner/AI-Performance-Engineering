@@ -10,6 +10,7 @@ import PageHeader from '../components/PageHeader.vue'
 import ApiList from '../components/apis/ApiList.vue'
 import ApiEditor from '../components/apis/ApiEditor.vue'
 import CurlImportDialog from '../components/apis/CurlImportDialog.vue'
+import DebugEnvBar from '../components/debug/DebugEnvBar.vue'
 
 // 接口页：左栏列表，右栏工作台（编辑 + 发送 + 看响应）。像 Postman 一样，一个接口占满右栏，不用对话框。
 const { items, loading, load, remove } = useResourceList(apisApi, '接口')
@@ -113,8 +114,10 @@ async function del(): Promise<void> {
   <div class="page apis-page">
     <PageHeader
       title="接口"
-      description="被测系统的一个请求：描述“请求什么、期望什么、取出什么”。顺序在业务流程里编排。选好被测环境就能直接发送一次看响应。"
-    />
+      description="被测系统的一个请求：描述“请求什么、期望什么、取出什么”。顺序在业务流程里编排。选好调试环境就能直接发送一次看响应。"
+    >
+      <DebugEnvBar />
+    </PageHeader>
     <div class="workbench">
       <ApiList
         class="workbench-list"
@@ -151,7 +154,7 @@ async function del(): Promise<void> {
 .apis-page {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--topbar-h) - 60px);
+  height: calc(100vh - 60px);
 }
 .workbench {
   display: grid;

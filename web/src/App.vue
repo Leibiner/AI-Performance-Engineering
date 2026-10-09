@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import {
   Connection,
@@ -12,21 +12,9 @@ import {
   Tickets,
 } from '@element-plus/icons-vue'
 import { systemApi, type SystemInfo } from './api'
-import { useDebugContext } from './composables/useDebugContext'
-import EnvPicker from './components/debug/EnvPicker.vue'
 
 const route = useRoute()
 const activeMenu = computed(() => (typeof route.meta.menu === 'string' ? route.meta.menu : route.path))
-
-// 页头右上角的"当前调试环境"：接口页的发送和业务流程的试跑都发往它；发起运行时默认选中它。
-// 换页面时刷新一次列表，在被测环境页改过的名称、新建的环境马上生效。
-const debugCtx = useDebugContext()
-watch(
-  () => route.path,
-  () => {
-    void debugCtx.loadEnvironments()
-  },
-)
 
 const menu = [
   { index: '/', label: '概览', icon: Odometer },
@@ -81,18 +69,9 @@ onBeforeUnmount(() => window.clearInterval(timer))
         <div v-else class="aside-meta aside-meta--warn">未连接到后端</div>
       </div>
     </el-aside>
-    <el-container direction="vertical" class="layout-body">
-      <header class="topbar">
-        <div class="topbar-env">
-          <span class="topbar-label" title="接口页的“发送”和业务流程的“试跑”都发往这里；发起运行时默认选中它，仍可在对话框里改">调试环境</span>
-          <EnvPicker />
-          <router-link class="topbar-link" to="/environments">管理</router-link>
-        </div>
-      </header>
-      <el-main class="layout-main">
-        <!-- 以完整路径为 key：从一个运行跳到另一个运行时重新创建页面 -->
-        <router-view :key="route.fullPath" />
-      </el-main>
-    </el-container>
+    <el-main class="layout-main">
+      <!-- 以完整路径为 key：从一个运行跳到另一个运行时重新创建页面 -->
+      <router-view :key="route.fullPath" />
+    </el-main>
   </el-container>
 </template>

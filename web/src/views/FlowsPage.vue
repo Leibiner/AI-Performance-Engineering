@@ -6,6 +6,7 @@ import { apisApi, flowsApi, type ApiDef, type Flow, type FlowInput } from '../ap
 import { useResourceList } from '../composables/useResourceList'
 import { showError } from '../utils/feedback'
 import PageHeader from '../components/PageHeader.vue'
+import DebugEnvBar from '../components/debug/DebugEnvBar.vue'
 import FlowDebugDialog from '../components/debug/FlowDebugDialog.vue'
 
 const { items, loading, load, remove } = useResourceList(flowsApi, '业务流程')
@@ -119,6 +120,7 @@ async function save(): Promise<void> {
       title="业务流程"
       description="按顺序执行的一组接口步骤，代表一个用户会做的一件事。流程里不写并发、到达率和时长，这些在负载配置里设。"
     >
+      <DebugEnvBar />
       <el-button type="primary" :icon="Plus" @click="openCreate">新建流程</el-button>
     </PageHeader>
 

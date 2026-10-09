@@ -7,7 +7,6 @@
   --aside-active: #ffffff;
   --ink-muted: #8a9099;
   --hairline: #e6e8ec;
-  --topbar-h: 48px;
 }
 
 html,
@@ -118,40 +117,6 @@ body {
   .running-dot {
     animation: none;
   }
-}
-
-.layout-body {
-  min-width: 0;
-}
-
-/* 页头：右上角是当前调试环境 */
-.topbar {
-  display: flex;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: flex-end;
-  height: var(--topbar-h);
-  padding: 0 24px;
-  border-bottom: 1px solid var(--hairline);
-  background: #fff;
-}
-.topbar-env {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.topbar-label {
-  color: var(--ink-muted);
-  font-size: 13px;
-  cursor: help;
-}
-.topbar-link {
-  color: var(--el-color-primary);
-  font-size: 13px;
-  text-decoration: none;
-}
-.topbar-link:hover {
-  text-decoration: underline;
 }
 
 .layout-main {
