@@ -151,7 +151,7 @@ async function del(): Promise<void> {
 .apis-page {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 60px);
+  height: calc(100vh - var(--topbar-h) - 60px);
 }
 .workbench {
   display: grid;

@@ -3,14 +3,17 @@ import { computed, onMounted } from 'vue'
 import { useDebugContext } from '../../composables/useDebugContext'
 import EnvTypeTag from '../EnvTypeTag.vue'
 
-// 被测环境选择器，长得像请求地址的"域名"部分：选中后显示它的基础地址和类型标签。
-// seamless 时去掉边框，嵌进请求栏的地址框里。
+// 当前调试环境的选择器。页头右上角、接口页请求栏的地址前缀、流程试跑对话框用的都是它，改的是同一个值。
+// seamless 时去掉边框，嵌进请求栏的地址框里。每次展开都重新拉一次列表，被测环境页上新建的马上能选。
 withDefaults(defineProps<{ seamless?: boolean }>(), { seamless: false })
 
 const { envId, environments, environment, loaded, loadEnvironments } = useDebugContext()
 onMounted(() => {
   if (!loaded.value) void loadEnvironments()
 })
+function onVisibleChange(open: boolean): void {
+  if (open) void loadEnvironments()
+}
 
 // 按地址长度给宽度，长地址不至于被截断，短地址不占位
 const width = computed(() => {
@@ -25,9 +28,10 @@ const width = computed(() => {
     class="env-picker"
     :class="{ 'is-seamless': seamless }"
     :style="{ width }"
-    placeholder="选择被测环境"
-    :title="environment ? `被测环境「${environment.name}」，请求发往这个地址` : '先选择被测环境'"
+    placeholder="选择调试环境"
+    :title="environment ? `当前调试环境「${environment.name}」：所有接口的发送和业务流程的试跑都发往这里` : '先选择调试环境'"
     no-data-text="还没有被测环境，先到“被测环境”页面新建"
+    @visible-change="onVisibleChange"
   >
     <template #label>
       <span v-if="environment" class="env-picker-label">

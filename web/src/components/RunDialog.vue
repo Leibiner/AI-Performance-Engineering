@@ -9,6 +9,7 @@ import {
   type Profile,
   type TestDef,
 } from '../api'
+import { useDebugContext } from '../composables/useDebugContext'
 import { useStartRun } from '../composables/useStartRun'
 import { showError } from '../utils/feedback'
 import { formatLimit } from '../utils/env'
@@ -21,6 +22,7 @@ const visible = defineModel<boolean>({ required: true })
 const props = defineProps<{ test: TestDef | null }>()
 
 const { starting, start } = useStartRun()
+const debugCtx = useDebugContext()
 
 const profiles = ref<Profile[]>([])
 const environments = ref<Environment[]>([])
@@ -73,9 +75,11 @@ async function loadOptions(): Promise<void> {
     const [p, e] = await Promise.all([profilesApi.list(), environmentsApi.list()])
     profiles.value = p
     environments.value = e
-    // 只有一个可选项时直接选上
+    // 只有一个可选项时直接选上；被测环境默认用右上角的当前调试环境（仍可改，生产照样二次确认）
     if (p.length === 1) profileId.value = p[0].id
-    if (e.length === 1) envId.value = e[0].id
+    const current = debugCtx.envId.value
+    if (current !== undefined && e.some((env) => env.id === current)) envId.value = current
+    else if (e.length === 1) envId.value = e[0].id
   } catch (err) {
     showError(err, '加载负载配置和被测环境失败')
   } finally {

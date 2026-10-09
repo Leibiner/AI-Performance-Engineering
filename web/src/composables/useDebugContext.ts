@@ -1,12 +1,34 @@
-import { computed, h, ref } from 'vue'
+import { computed, h, ref, watch } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { environmentsApi, type Environment } from '../api'
 import { showError } from '../utils/feedback'
 import { fromRows, type KvRow } from '../utils/kv'
 
-// 调试上下文：选中的被测环境、初始变量、已经确认过的生产环境。放在模块级，切换页面后还在，
-// 像 Postman 右上角的环境选择一样是"当前工作环境"，不是某个表单的字段。
-const envId = ref<number | undefined>()
+// 调试上下文：当前调试环境、初始变量、已经确认过的生产环境。放在模块级，切换页面后还在，
+// 像 Postman 右上角的环境选择一样是"当前工作环境"，不是某个接口的字段：
+// 页头右上角、接口页请求栏里的地址前缀、流程试跑对话框里的选择器，改的都是同一个值。
+// 环境 id 存 localStorage，刷新后还在；变量和生产确认只在本次会话里。
+const STORAGE_KEY = 'perf-console.debugEnvId'
+
+function readStoredEnvId(): number | undefined {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    const n = raw === null ? NaN : Number(raw)
+    return Number.isInteger(n) && n > 0 ? n : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const envId = ref<number | undefined>(readStoredEnvId())
+watch(envId, (value) => {
+  try {
+    if (value === undefined) window.localStorage.removeItem(STORAGE_KEY)
+    else window.localStorage.setItem(STORAGE_KEY, String(value))
+  } catch {
+    // 隐私模式等情况下写不了，忽略
+  }
+})
 const varRows = ref<KvRow[]>([])
 const environments = ref<Environment[]>([])
 const loaded = ref(false)
