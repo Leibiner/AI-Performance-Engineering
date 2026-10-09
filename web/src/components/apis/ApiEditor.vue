@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CopyDocument, Delete, DocumentCopy, Plus, Position } from '@element-plus/icons-vue'
+import { CopyDocument, Delete, DocumentCopy, Plus, Position, RefreshLeft } from '@element-plus/icons-vue'
 import type { ExtractFrom } from '../../api'
 import { useDebug } from '../../composables/useDebug'
 import { useDebugContext } from '../../composables/useDebugContext'
@@ -52,17 +52,52 @@ function onQueryRows(rows: KvRow[]): void {
 
 const tab = ref('params')
 const queryCount = computed(() => queryRows.value.filter((r) => r.key.trim() !== '').length)
-const headerCount = computed(() => form.value.headers.filter((r) => r.key.trim() !== '').length)
 
 /** 当前调试环境的公共请求头：只读显示，接口里同名（不区分大小写）的会覆盖它 */
-const inheritedHeaders = computed(() => {
-  const own = new Set(form.value.headers.map((r) => r.key.trim().toLowerCase()).filter(Boolean))
-  return Object.entries(ctx.environment.value?.headers ?? {}).map(([name, value]) => ({
-    name,
-    value,
-    overridden: own.has(name.toLowerCase()),
-  }))
+// 环境请求头和接口请求头合成一张可编辑的表：改环境行的值 = 在接口里加一条同名请求头覆盖它（只影响本接口）；
+// 删除覆盖行 = 恢复继承。名称比较不区分大小写，和引擎的合并规则一致。
+interface HeaderRow {
+  rowKey: string
+  source: 'env' | 'override' | 'own'
+  key: string
+  value: string
+  /** form.headers 里的下标；env 行没有 */
+  index: number
+}
+const headerRows = computed<HeaderRow[]>(() => {
+  const own = form.value.headers
+  const lower = (k: string) => k.trim().toLowerCase()
+  const used = new Set<number>()
+  const rows: HeaderRow[] = []
+  for (const [name, value] of Object.entries(ctx.environment.value?.headers ?? {})) {
+    const i = own.findIndex((r) => lower(r.key) === name.toLowerCase())
+    if (i >= 0) {
+      used.add(i)
+      rows.push({ rowKey: `env-${name.toLowerCase()}`, source: 'override', key: own[i].key, value: own[i].value, index: i })
+    } else {
+      rows.push({ rowKey: `env-${name.toLowerCase()}`, source: 'env', key: name, value, index: -1 })
+    }
+  }
+  own.forEach((r, i) => {
+    if (!used.has(i)) rows.push({ rowKey: `own-${i}`, source: 'own', key: r.key, value: r.value, index: i })
+  })
+  return rows
 })
+const headerTotal = computed(() => headerRows.value.filter((r) => r.key.trim() !== '').length)
+
+function setHeader(row: HeaderRow, field: 'key' | 'value', text: string): void {
+  if (row.source === 'env') {
+    form.value.headers.push({ key: row.key, value: field === 'value' ? text : row.value })
+  } else {
+    form.value.headers[row.index] = { ...form.value.headers[row.index], [field]: text }
+  }
+}
+function removeHeader(row: HeaderRow): void {
+  if (row.index >= 0) form.value.headers.splice(row.index, 1)
+}
+function addHeader(): void {
+  form.value.headers.push({ key: '', value: '' })
+}
 const extractCount = computed(() => form.value.extracts.filter((e) => e.var.trim() !== '' || e.expr.trim() !== '').length)
 const bodyIsJsonLike = computed(() => /^\s*[[{]/.test(form.value.body))
 
@@ -212,26 +247,47 @@ async function copyCurl(): Promise<void> {
       </el-tab-pane>
 
       <el-tab-pane name="headers">
-        <template #label>
-          请求头<span v-if="headerCount + inheritedHeaders.length" class="tab-count">{{ headerCount + inheritedHeaders.length }}</span>
-        </template>
-        <div v-if="inheritedHeaders.length" class="inherited">
-          <div class="inherited-title">
-            继承自「{{ ctx.environment.value?.name }}」
+        <template #label>请求头<span v-if="headerTotal" class="tab-count">{{ headerTotal }}</span></template>
+        <div class="row-list">
+          <div v-for="row in headerRows" :key="row.rowKey" class="row-item header-row" :class="`is-${row.source}`">
+            <el-input
+              :model-value="row.key"
+              :readonly="row.source !== 'own'"
+              placeholder="名称"
+              style="width: 34%"
+              @update:model-value="setHeader(row, 'key', $event)"
+            />
+            <el-input
+              :model-value="row.value"
+              class="grow"
+              placeholder="值，可用 {{变量名}}"
+              @update:model-value="setHeader(row, 'value', $event)"
+            />
+            <span class="header-source">
+              <el-tag
+                v-if="row.source !== 'own'"
+                :key="row.source"
+                disable-transitions
+                size="small"
+                :type="row.source === 'env' ? 'info' : 'warning'"
+                effect="plain"
+              >
+                {{ row.source === 'env' ? '环境' : '覆盖环境' }}
+              </el-tag>
+            </span>
+            <el-button
+              v-if="row.source === 'override'"
+              :icon="RefreshLeft"
+              circle
+              text
+              title="恢复继承"
+              @click="removeHeader(row)"
+            />
+            <el-button v-else-if="row.source === 'own'" :icon="Delete" circle text title="删除" @click="removeHeader(row)" />
+            <span v-else class="header-action-placeholder" />
           </div>
-          <div v-for="h in inheritedHeaders" :key="h.name" class="inherited-row" :class="{ 'is-overridden': h.overridden }">
-            <span class="inherited-key">{{ h.name }}</span>
-            <span class="inherited-value mono">{{ h.value }}</span>
-            <span v-if="h.overridden" class="inherited-note">已覆盖</span>
-          </div>
+          <el-button :icon="Plus" size="small" @click="addHeader">添加请求头</el-button>
         </div>
-        <div v-if="inheritedHeaders.length" class="inherited-title own-title">接口</div>
-        <KeyValueEditor
-          v-model="form.headers"
-          key-placeholder="请求头名称，如 Authorization"
-          value-placeholder="值，可以用 {{变量名}}"
-          add-text="添加请求头"
-        />
       </el-tab-pane>
 
       <el-tab-pane name="body">
@@ -420,49 +476,20 @@ async function copyCurl(): Promise<void> {
   max-width: 640px;
 }
 
-.inherited {
-  margin-bottom: 12px;
-  padding: 8px 10px;
-  border: 1px dashed var(--hairline);
-  border-radius: 6px;
+.header-row.is-env :deep(.el-input__wrapper) {
   background: #fafbfc;
 }
-.inherited-title {
-  margin-bottom: 6px;
-  color: var(--el-text-color-regular);
-  font-size: 12px;
-}
-.own-title {
-  margin-bottom: 8px;
-}
-.inherited-row {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  padding: 3px 0;
-  font-size: 13px;
+.header-row.is-env :deep(.el-input__inner),
+.header-row :deep(.el-input__inner[readonly]) {
   color: var(--el-text-color-regular);
 }
-.inherited-key {
-  width: 38%;
+.header-source {
+  width: 72px;
   flex-shrink: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-.inherited-value {
-  flex: 1;
-  min-width: 0;
-  word-break: break-all;
-}
-.inherited-row.is-overridden .inherited-key,
-.inherited-row.is-overridden .inherited-value {
-  color: var(--ink-muted);
-  text-decoration: line-through;
-}
-.inherited-note {
+.header-action-placeholder {
+  width: 32px;
   flex-shrink: 0;
-  color: var(--el-color-warning);
-  font-size: 12px;
 }
 .vars-updated {
   color: #1f8a3b;
