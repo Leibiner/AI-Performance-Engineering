@@ -2,8 +2,8 @@
 import { computed, ref } from 'vue'
 import { splitVars, varNames } from '../utils/vars'
 
-// 带变量高亮的输入框：输入框文字透明只留光标，底下一层逐字对齐地渲染文本，{{变量}} 上色。
-// 有当前值的蓝色；没值但有接口会提取它的紫色；两者都不是的橙色加波浪线（多半拼错或漏定义）。
+// 输入框文字透明只留光标，底下一层逐字对齐地渲染文本，只给括号上色：
+// {{ }} 按变量状态着色（有值蓝、待提取紫、未定义橙），普通 { } 用中性色；括号里的内容不加样式。
 const model = defineModel<string>({ default: '' })
 const props = withDefaults(
   defineProps<{
@@ -38,6 +38,14 @@ const title = computed(() => {
     .join('\n')
 })
 
+const OPEN = '{{'
+const CLOSE = '}}'
+
+/** 普通文本按单个 { } 切开 */
+function braceParts(text: string): string[] {
+  return text.split(/([{}])/).filter((x) => x !== '')
+}
+
 const layer = ref<HTMLElement>()
 function syncScroll(e: Event): void {
   const el = e.target as HTMLElement
@@ -52,8 +60,15 @@ function syncScroll(e: Event): void {
   <div class="var-field" :class="{ 'is-multiline': multiline, 'is-seamless': seamless, 'is-readonly': readonly }" :title="title">
     <div ref="layer" class="var-layer" aria-hidden="true">
       <template v-for="(seg, i) in segments" :key="i">
-        <span v-if="seg.name" class="var-ref" :class="state(seg.name)">{{ seg.text }}</span>
-        <template v-else>{{ seg.text }}</template>
+        <template v-if="seg.name">
+          <span class="var-brace" :class="state(seg.name)">{{ OPEN }}</span>{{ seg.text.slice(2, -2) }}<span class="var-brace" :class="state(seg.name)">{{ CLOSE }}</span>
+        </template>
+        <template v-else>
+          <template v-for="(part, j) in braceParts(seg.text)" :key="j">
+            <span v-if="part === '{' || part === '}'" class="brace">{{ part }}</span>
+            <template v-else>{{ part }}</template>
+          </template>
+        </template>
       </template>
       <!-- 末尾换行时撑出最后一行的高度 -->
       <template v-if="multiline">&#8203;</template>
@@ -157,21 +172,19 @@ function syncScroll(e: Event): void {
   resize: vertical;
   overflow: auto;
 }
-.var-ref {
-  border-radius: 3px;
+.brace {
+  color: #8a6d3b;
 }
-.var-ref.is-known {
-  background: rgba(64, 158, 255, 0.14);
+.var-brace.is-known {
   color: #1d6fd6;
 }
-.var-ref.is-extracted {
-  background: rgba(124, 77, 255, 0.12);
+.var-brace.is-extracted {
   color: #6a3fd1;
 }
-.var-ref.is-unknown {
-  background: rgba(230, 162, 60, 0.16);
-  color: #c45a00;
-  text-decoration: underline wavy rgba(230, 120, 0, 0.7);
-  text-underline-offset: 3px;
+.var-brace.is-unknown {
+  color: #d9480f;
+}
+.var-brace {
+  font-weight: inherit;
 }
 </style>
