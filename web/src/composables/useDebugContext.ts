@@ -4,15 +4,6 @@ import { environmentsApi, type DebugResult, type Environment } from '../api'
 import { showError } from '../utils/feedback'
 import { fromRows, toRows, type KvRow } from '../utils/kv'
 
-// 调试上下文：当前调试环境、初始变量、已经确认过的生产环境。放在模块级，切换页面后还在，
-// 像 Postman 右上角的环境选择一样是"当前工作环境"，不是某个接口的字段：
-// 页头右上角、接口页请求栏里的地址前缀、流程试跑对话框里的选择器，改的都是同一个值。
-// 环境 id 和每个环境的变量当前值存 localStorage，刷新后还在；生产确认只在本次会话里。
-//
-// 变量分两层，和 Postman / Apifox 的环境变量一样：
-//   初始值  存在被测环境上（environments.variables），压测每次迭代都从它开始
-//   当前值  只在浏览器里、按环境分开保存；第一次用某个环境时从初始值复制一份；
-//           每次发送 / 试跑后，提取到的变量写回当前值，下一个请求就能直接用
 const STORAGE_KEY = 'perf-console.debugEnvId'
 const VARS_KEY = 'perf-console.debugVars'
 
@@ -82,7 +73,6 @@ export function useDebugContext() {
   const vars = computed(() => fromRows(varRows.value))
   const varCount = computed(() => varRows.value.filter((r) => r.key.trim() !== '').length)
 
-  /** 把当前值恢复成环境上的初始值 */
   function resetVars(): void {
     varRows.value = toRows(initialVars.value)
   }
@@ -120,7 +110,6 @@ export function useDebugContext() {
     }
   }
 
-  /** 现在能不能发送；不能时返回原因 */
   const blocker = computed<string | null>(() => (environment.value ? null : '先选择被测环境'))
 
   /**

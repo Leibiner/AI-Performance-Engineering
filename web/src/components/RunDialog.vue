@@ -166,7 +166,7 @@ async function confirm(): Promise<void> {
           </span>
         </div>
         <div v-if="environment?.type === 'prod'" class="form-hint limit-warn">
-          这是生产环境。点“开始运行”后会再确认一次。
+          生产环境，开始前需再次确认
         </div>
       </el-form-item>
 
@@ -179,7 +179,6 @@ async function confirm(): Promise<void> {
           </span>
         </template>
         <span v-else class="muted">本机执行机（默认）</span>
-        <div class="form-hint">k6 在这台机器上运行，并从它向被测环境发出请求。</div>
       </el-form-item>
 
       <el-form-item v-if="environment" label="安全上限">
@@ -202,7 +201,7 @@ async function confirm(): Promise<void> {
           </tbody>
         </table>
         <div v-if="overLimit" class="form-hint limit-warn">
-          这个负载配置超过了被测环境的安全上限，发起后会被预检拒绝。请换一个负载更小的负载配置，或者换一个允许这个流量的被测环境。安全上限是对目标系统的保护，不要为了让运行通过而调高它。
+          超出安全上限，预检会拒绝
         </div>
       </el-form-item>
 

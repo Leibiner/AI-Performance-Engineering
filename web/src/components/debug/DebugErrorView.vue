@@ -2,8 +2,6 @@
 import { computed } from 'vue'
 import type { ApiError } from '../../api'
 
-// 调试没有拿到结果时的展示：预检被拒、有运行在进行、k6 没产出记录。
-// k6 失败时 details 是日志的最后几行，用等宽文本整块显示；其余情况逐条列出。
 const props = defineProps<{ error: ApiError }>()
 
 const isLog = computed(() => props.error.code === 'DEBUG_FAILED')

@@ -11,14 +11,12 @@ import DebugStepPanel from './DebugStepPanel.vue'
 import DebugVarsEditor from './DebugVarsEditor.vue'
 import EnvPicker from './EnvPicker.vue'
 
-// 试跑业务流程：选被测环境后用真实 k6 跑一次迭代，逐步展示结果。
 const visible = defineModel<boolean>({ required: true })
 const props = defineProps<{ flow: Flow | null }>()
 
 const ctx = useDebugContext()
 const { running, result, error, run, reset } = useDebug()
 const opened = ref<string[]>([])
-/** 这次试跑后写回环境变量当前值的变量名 */
 const updatedVars = ref<string[]>([])
 
 watch(visible, (open) => {
@@ -51,9 +49,6 @@ async function start(): Promise<void> {
 
 <template>
   <el-dialog v-model="visible" :title="`试跑业务流程：${flow?.name ?? ''}`" width="1000px" top="5vh" :close-on-click-modal="false">
-    <p class="form-hint flow-debug-hint">
-      用真实 k6 按顺序执行一次（1 并发、1 次迭代），步骤之间不等待。某一步的检查没通过时，后面的步骤不执行，和压测时的行为一致。不产生运行记录。
-    </p>
     <div class="flow-debug-bar">
       <span class="muted">发往</span>
       <EnvPicker />
@@ -81,8 +76,7 @@ async function start(): Promise<void> {
     <template v-else-if="result">
       <div class="flow-debug-summary" :class="result.ok ? 'is-ok' : 'is-bad'">
         <strong>{{ result.ok ? '全部步骤通过' : `${passedCount} / ${result.steps.length} 步通过` }}</strong>
-        <span class="muted">k6 用时 {{ formatMs(result.durationMs) }}（含启动）· 迭代结束时有 {{ Object.keys(result.vars).length }} 个变量</span>
-        <span v-if="updatedVars.length" class="muted">· 已更新环境变量当前值：<span class="mono">{{ updatedVars.join('、') }}</span></span>
+        <span v-if="updatedVars.length" class="muted">已更新变量 <span class="mono">{{ updatedVars.join('、') }}</span></span>
       </div>
       <el-collapse v-model="opened" class="flow-steps">
         <el-collapse-item v-for="(step, index) in result.steps" :key="step.key" :name="step.key">
@@ -102,7 +96,7 @@ async function start(): Promise<void> {
       </el-collapse>
     </template>
 
-    <div v-else-if="!running" class="flow-debug-empty">点“试跑一次”后，这里按步骤显示请求、响应、检查和变量。</div>
+    <div v-else-if="!running" class="flow-debug-empty">点击试跑查看各步骤结果</div>
   </el-dialog>
 </template>
 

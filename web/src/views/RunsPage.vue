@@ -123,7 +123,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page">
-    <PageHeader title="运行" description="每次运行都会自动保存。“存档”表示要长期保留，已存档的运行不能删除。">
+    <PageHeader title="运行">
       <el-button :icon="Refresh" @click="load()">刷新</el-button>
     </PageHeader>
 

@@ -142,14 +142,11 @@ async function save(): Promise<void> {
 <template>
   <div class="page">
     <PageHeader title="被测环境">
-      <template #description>
-        被测系统部署在哪里：开发、测试、预发或生产，以及这个环境的地址和安全上限。它不是执行机——发起压测的机器在“执行机”页面。
-      </template>
       <el-button type="primary" :icon="Plus" @click="openCreate">新建被测环境</el-button>
     </PageHeader>
 
     <div class="panel">
-      <el-table v-loading="loading" :data="items" empty-text="还没有被测环境">
+      <el-table v-loading="loading" :data="items" empty-text="暂无数据">
         <el-table-column prop="name" label="名称" min-width="160" />
         <el-table-column label="类型" width="80">
           <template #default="{ row }"><EnvTypeTag :type="row.type" /></template>
@@ -203,11 +200,9 @@ async function save(): Promise<void> {
           <el-select v-model="form.type" placeholder="选择类型" style="width: 220px" @change="onTypeChange">
             <el-option v-for="t in ENV_TYPE_OPTIONS" :key="t.value" :label="t.label" :value="t.value" />
           </el-select>
-          <div class="form-hint">对生产环境发起压测前会再确认一次，并且必须设置安全上限。</div>
         </el-form-item>
         <el-form-item label="基础地址" prop="baseUrl">
           <el-input v-model="form.baseUrl" placeholder="https://www.example.com" />
-          <div class="form-hint">接口的路径会拼在这个地址后面。</div>
         </el-form-item>
         <el-form-item label="公共请求头">
           <KeyValueEditor
@@ -216,7 +211,6 @@ async function save(): Promise<void> {
             value-placeholder="值"
             add-text="添加请求头"
           />
-          <div class="form-hint">发往这个环境的所有请求都会带上这些请求头；接口里同名的请求头会覆盖它。接口页的“请求头”里能看到继承来的这些。</div>
         </el-form-item>
         <el-form-item label="环境变量">
           <KeyValueEditor
@@ -225,20 +219,11 @@ async function save(): Promise<void> {
             value-placeholder="初始值"
             add-text="添加变量"
           />
-          <div class="form-hint">
-            接口的路径、请求头、请求体里用 <code v-pre>{{变量名}}</code> 引用。这里是初始值：压测每次迭代都从它开始；调试时页面会记住“当前值”，发送后提取到的变量自动更新当前值，不会改这里。
-          </div>
         </el-form-item>
 
         <fieldset class="limit-group" :class="{ 'is-prod': isProd }">
           <legend>安全上限</legend>
-          <p class="limit-desc">
-            这是保护被测环境的护栏，不是负载配置。不管选哪个负载配置，超过这里的上限就不允许运行。压多大在“负载配置”里设置。
-          </p>
-          <p class="limit-desc">
-            <template v-if="isProd">生产环境必须三项都填写。</template>
-            <template v-else>留空表示不限制。类型为生产时三项必填。</template>
-          </p>
+          <p v-if="isProd" class="limit-desc">生产环境三项必填</p>
           <el-form-item label="最大并发" prop="maxVus" :required="isProd">
             <el-input-number
               v-model="form.maxVus"

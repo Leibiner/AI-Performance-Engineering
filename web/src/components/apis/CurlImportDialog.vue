@@ -58,9 +58,6 @@ function confirm(): void {
         <strong>{{ parsed.input.method }}</strong>
         <span class="mono">{{ parsed.input.path }}</span>
       </div>
-      <div class="form-hint">
-        原命令的地址是 <span class="mono">{{ parsed.origin }}</span>，对应被测环境的基础地址；这里只导入路径部分。发送前请确认所选被测环境指向同一个地址。
-      </div>
       <table v-if="headerRows.length" class="curl-table">
         <tbody>
           <tr v-for="[name, value] in headerRows" :key="name">
@@ -70,7 +67,6 @@ function confirm(): void {
         </tbody>
       </table>
       <pre v-if="parsed.input.body !== null" class="curl-body">{{ parsed.input.body }}</pre>
-      <div class="form-hint">期望状态码默认 200；“期望包含的文本”和“变量提取”需要在编辑器里补充。</div>
     </div>
 
     <template #footer>

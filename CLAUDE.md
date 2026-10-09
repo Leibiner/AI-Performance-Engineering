@@ -78,6 +78,7 @@ K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --por
 
 - `server/` 不 import `perf/`：两边只通过 `plan.json`、命令行参数、退出码和 `results/` 里的文件交互。
 - 前端页面只通过 `web/src/api/` 访问后端，不直接写 fetch。
+- **前端面向有经验的用户**：页面上不写说明性文案（页头描述、表单提示、区块副标题、长空状态），只保留安全警示（生产确认、超出安全上限）和错误信息；代码注释只写不显而易见的约束，不写文件头叙述、分节线和复述代码的注释。
 - 业务流程是数据，不是代码：新增流程不加文件。`runner.js` 只导出一个执行函数 `runFlow`，用 scenario 名（= 流程的 `key`）找回对应的流程。每一步按 `{{变量}}` 替换 → 发请求 → check → 提取变量 → 等待 `thinkTimeMs` 执行；变量的作用域是一次迭代，某一步的 check 没通过时本次迭代剩下的步骤不再执行（`perf/core/interp.js`）。
 - 数据在 `data/app.db`（SQLite 单文件）。种子数据在 `server/seed.py`，只在全新的库里写一次；改了种子要删库才会生效。
 - **改表结构要写迁移，不能删库**：库里有用户的真实数据。表结构版本记在 `PRAGMA user_version`，在 `server/db.py` 里把 `SCHEMA_VERSION` 加 1 并加一段迁移（备份 → 一个事务内迁移 → 写版本号），先在库的拷贝上验证，再重启正式服务。迁移前会自动备份到 `data/app.db.v<旧版本>.bak`（已存在则不覆盖）；迁移后不能直接回退旧代码，要先用备份还原。

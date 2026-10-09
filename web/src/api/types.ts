@@ -7,8 +7,6 @@ export interface Stamped {
   updatedAt: string
 }
 
-// ---------- 执行机（契约 §3.3） ----------
-
 /** 执行机：安装了本项目、实际运行 k6 的机器。目前只有本机一台，没有新增和删除。 */
 export interface Executor extends Stamped {
   name: string
@@ -40,8 +38,6 @@ export interface ExecutorInput {
   note: string
 }
 
-// ---------- 被测环境 ----------
-
 /** 被测环境的类型：开发 / 测试 / 预发 / 生产 */
 export type EnvType = 'dev' | 'test' | 'staging' | 'prod'
 
@@ -62,8 +58,6 @@ export interface EnvironmentInput {
 }
 export type Environment = EnvironmentInput & Stamped
 
-// ---------- 文件夹（接口的分组，可嵌套） ----------
-
 export interface FolderInput {
   name: string
   /** 上级文件夹；null 表示顶层 */
@@ -71,8 +65,6 @@ export interface FolderInput {
   note: string
 }
 export type Folder = FolderInput & Stamped
-
-// ---------- 接口 ----------
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 export type ExtractFrom = 'json' | 'regex' | 'header'
@@ -98,8 +90,6 @@ export interface ApiDefInput {
 }
 export type ApiDef = ApiDefInput & Stamped
 
-// ---------- 业务流程 ----------
-
 export interface FlowStepInput {
   apiId: number
   thinkTimeMs: number
@@ -120,8 +110,6 @@ export interface Flow extends Stamped {
   note: string
   steps: FlowStep[]
 }
-
-// ---------- 负载配置 ----------
 
 export type ProfileType = 'smoke' | 'average' | 'stress' | 'spike' | 'soak' | 'breakpoint'
 export type LoadModel = 'closed' | 'open'
@@ -168,8 +156,6 @@ export interface ProfileInput {
 }
 export type Profile = ProfileInput & Stamped
 
-// ---------- 测试 ----------
-
 export interface Slo {
   p95Ms: number | null
   p99Ms: number | null
@@ -203,8 +189,6 @@ export interface TestDef extends Stamped {
   slo: Slo
   lastRun: LastRun | null
 }
-
-// ---------- 运行 ----------
 
 export type Verdict = 'passed' | 'failed' | 'invalid' | 'error' | 'aborted'
 export type RunStatus = 'running' | 'finished'
@@ -288,8 +272,6 @@ export type ArtifactName =
   | 'dashboard.html'
   | 'k6.log'
 
-// ---------- plan.json（契约 §4），作为运行的 snapshot ----------
-
 export interface PlanStep {
   key: string
   name: string
@@ -317,8 +299,6 @@ export interface Plan {
   flows: PlanFlow[]
   slo: Slo
 }
-
-// ---------- Run Record（契约 §5） ----------
 
 export type ThresholdKind = 'slo' | 'validity'
 
@@ -407,8 +387,6 @@ export interface RecordExecutor {
   samples: number
 }
 
-// ---------- 其他（契约 §3.3） ----------
-
 export interface SystemInfo {
   k6Version: string
   pythonVersion: string
@@ -432,8 +410,6 @@ export interface Overview {
   recentRuns: RunListItem[]
   runningRunId: string | null
 }
-
-// ---------- 调试（契约 §3.5、§5.1） ----------
 
 export type DebugStepStatus = 'passed' | 'failed' | 'skipped' | 'error'
 

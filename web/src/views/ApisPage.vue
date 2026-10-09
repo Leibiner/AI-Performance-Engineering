@@ -13,10 +13,8 @@ import ApiEditor from '../components/apis/ApiEditor.vue'
 import CurlImportDialog from '../components/apis/CurlImportDialog.vue'
 import DebugEnvBar from '../components/debug/DebugEnvBar.vue'
 
-// 接口页：左栏文件夹树（项目 → 模块 → 接口），右栏工作台（编辑 + 发送 + 看响应）。像 Postman 一样，一个接口占满右栏，不用对话框。
 const { items, loading, load, remove } = useResourceList(apisApi, '接口')
 
-// ---------- 文件夹 ----------
 const folders = ref<Folder[]>([])
 async function loadFolders(): Promise<void> {
   try {
@@ -78,9 +76,7 @@ async function deleteFolder(folder: Folder): Promise<void> {
 }
 
 const selectedId = ref<number | null>(null)
-/** 正在编辑的内容；null 表示既没选中也没在新建 */
 const form = ref<ApiForm | null>(null)
-/** 打开时的快照，用来判断有没有改动 */
 const baseline = ref('')
 const saving = ref(false)
 const importVisible = ref(false)
@@ -183,7 +179,6 @@ async function del(): Promise<void> {
   <div class="page apis-page">
     <PageHeader
       title="接口"
-      description="被测系统的一个请求：描述“请求什么、期望什么、取出什么”。顺序在业务流程里编排。选好调试环境就能直接发送一次看响应。"
     >
       <DebugEnvBar />
     </PageHeader>
@@ -215,8 +210,7 @@ async function del(): Promise<void> {
           @delete="del"
         />
         <div v-else class="workbench-empty">
-          <p>选择左侧的接口，或点“新建”。接口多了可以先建文件夹，按项目、模块分组。</p>
-          <p class="muted">也可以把浏览器开发者工具里“复制为 cURL”的命令粘进来，直接生成接口。</p>
+          <p class="muted">选择或新建接口</p>
         </div>
       </section>
     </div>

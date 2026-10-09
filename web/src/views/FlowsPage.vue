@@ -139,14 +139,13 @@ async function save(): Promise<void> {
   <div class="page">
     <PageHeader
       title="业务流程"
-      description="按顺序执行的一组接口步骤，代表一个用户会做的一件事。流程里不写并发、到达率和时长，这些在负载配置里设。"
     >
       <DebugEnvBar />
       <el-button type="primary" :icon="Plus" @click="openCreate">新建流程</el-button>
     </PageHeader>
 
     <div class="panel">
-      <el-table v-loading="loading" :data="items" empty-text="还没有业务流程">
+      <el-table v-loading="loading" :data="items" empty-text="暂无数据">
         <el-table-column prop="name" label="名称" min-width="160" />
         <el-table-column label="步骤" min-width="420">
           <template #default="{ row }">
@@ -228,9 +227,6 @@ async function save(): Promise<void> {
               <el-button :icon="Delete" circle text title="删除这一步" style="margin-left: 0" @click="form.steps.splice(index, 1)" />
             </div>
             <el-button :icon="Plus" size="small" @click="addStep">添加步骤</el-button>
-          </div>
-          <div class="form-hint">
-            步骤按从上到下的顺序执行。“执行后等待”模拟用户在两次操作之间的停顿（think time）。同一个接口可以出现多次。
           </div>
         </el-form-item>
         <el-form-item label="备注">

@@ -5,8 +5,6 @@ import { STEP_STATUS, checksSummary, formatChars, tryPrettyJson } from '../../ut
 import { formatMs } from '../../utils/format'
 import { STATUS_STYLE, statusKind, statusLabel } from '../../utils/http-status'
 
-// 一步的响应面板：状态行（状态码、耗时、大小、检查）+ 标签页（响应体 / 响应头 / 检查 / 变量 / 实际请求 / 耗时分解）。
-// 接口页直接用它显示唯一的一步；流程试跑在每个步骤下面各放一个。
 const props = defineProps<{ step: DebugStep }>()
 
 const tab = ref('body')
@@ -47,7 +45,6 @@ const timingRows = computed(() => {
 
 <template>
   <div class="step-panel">
-    <!-- 没有执行：只有原因 -->
     <el-alert
       v-if="notRun"
       :type="step.status === 'error' ? 'error' : 'info'"
@@ -117,7 +114,6 @@ const timingRows = computed(() => {
               <span class="mono">{{ c.name }}</span>
             </li>
           </ul>
-          <p class="form-hint">压测时这些检查的通过率就是“检查通过率”，是判定有效性的依据。</p>
         </el-tab-pane>
 
         <el-tab-pane name="vars">
@@ -183,7 +179,6 @@ const timingRows = computed(() => {
               </tr>
             </tbody>
           </table>
-          <p class="form-hint">和 k6 的 http_req_duration 口径一致，不含“阻塞”这一项。单次请求的耗时只用于排查，不代表压测时的响应时间。</p>
         </el-tab-pane>
       </el-tabs>
     </template>

@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import EnvPicker from './EnvPicker.vue'
 
-// 页头右侧的"调试环境"：只出现在会发请求的页面（接口、业务流程）。
-// 接口页请求栏里的地址前缀、流程试跑对话框里的选择器，改的都是它这同一个值。
 </script>
 
 <template>

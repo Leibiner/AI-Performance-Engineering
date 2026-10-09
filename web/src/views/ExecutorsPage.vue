@@ -40,8 +40,6 @@ onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
 })
 
-// ---------- 显示 ----------
-
 const KIND_LABELS: Record<string, string> = { local: '本机' }
 
 function text(value: string | number | null | undefined): string {
@@ -55,8 +53,6 @@ function memory(x: Executor): string {
   if (x.memTotalMb === null && x.memAvailableMb === null) return DASH
   return `${mbToGb(x.memTotalMb)} / 可用 ${mbToGb(x.memAvailableMb)}`
 }
-
-// ---------- 编辑名称和备注 ----------
 
 interface FormState {
   name: string
@@ -98,15 +94,11 @@ async function save(): Promise<void> {
 <template>
   <div v-loading="loading" class="page">
     <PageHeader title="执行机">
-      <template #description>
-        执行机是安装了本项目、实际发起压测的机器（k6 在它上面运行）。它不是被测环境——被测系统的地址在“被测环境”页面。<br />
-        目前只支持本机一台；多台执行机（分布式执行）尚未支持，所以这里不能新增或删除。
-      </template>
       <el-button :icon="Refresh" @click="load()">刷新</el-button>
     </PageHeader>
 
     <div v-if="!loading && items.length === 0" class="panel">
-      <el-empty description="没有执行机。后端会在建库时自动创建本机执行机，请检查后端是否已更新。" />
+      <el-empty description="暂无执行机" />
     </div>
 
     <div v-for="x in items" :key="x.id" class="panel">
@@ -192,7 +184,6 @@ async function save(): Promise<void> {
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.note" type="textarea" :rows="3" />
-          <div class="form-hint">只有名称和备注可以修改，其余信息由后端实时采集。</div>
         </el-form-item>
       </el-form>
       <template #footer>

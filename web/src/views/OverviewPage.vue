@@ -73,7 +73,7 @@ const verdictRows = computed(() => {
 
 <template>
   <div v-loading="loading" class="page">
-    <PageHeader title="概览" description="先维护被测环境、接口、业务流程、负载配置，再把它们组合成测试，然后从执行机发起运行。">
+    <PageHeader title="概览">
       <el-button :icon="Refresh" @click="load()">刷新</el-button>
     </PageHeader>
 
@@ -127,7 +127,7 @@ const verdictRows = computed(() => {
         <small>最近 10 次</small>
         <router-link class="more-link" to="/runs">全部运行</router-link>
       </h2>
-      <el-table :data="data?.recentRuns ?? []" empty-text="还没有运行。到“测试”页面点“运行”发起第一次。">
+      <el-table :data="data?.recentRuns ?? []" empty-text="暂无运行">
         <el-table-column label="开始时间" width="170">
           <template #default="{ row }">
             <router-link class="run-link num" :to="`/runs/${row.runId}`">{{ formatTime(row.startedAt) }}</router-link>

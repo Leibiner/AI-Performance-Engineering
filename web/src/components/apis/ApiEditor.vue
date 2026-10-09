@@ -9,7 +9,6 @@ import { toInput, type ApiForm } from '../../utils/api-form'
 import type { FolderOption } from '../../utils/folders'
 import { buildCurl } from '../../utils/curl'
 import { tryPrettyJson } from '../../utils/debug'
-import { formatMs } from '../../utils/format'
 import type { KvRow } from '../../utils/kv'
 import { METHODS, METHOD_COLOR } from '../../utils/method'
 import { joinPath, splitPath } from '../../utils/query'
@@ -19,8 +18,6 @@ import DebugStepPanel from '../debug/DebugStepPanel.vue'
 import DebugVarsEditor from '../debug/DebugVarsEditor.vue'
 import EnvPicker from '../debug/EnvPicker.vue'
 
-// 接口工作台：请求栏（方法、被测环境 + 路径、发送、保存）、请求标签页（含调试变量）、响应面板。
-// 发送的是正在编辑的内容，不要求先保存。
 const form = defineModel<ApiForm>({ required: true })
 defineProps<{ isNew: boolean; dirty: boolean; saving: boolean; folderOptions: FolderOption[] }>()
 const emit = defineEmits<{ save: []; duplicate: []; delete: [] }>()
@@ -34,7 +31,6 @@ watch(
   () => reset(),
 )
 
-// ---------- query 参数 ↔ 路径（路径是唯一的事实来源） ----------
 const queryRows = ref<KvRow[]>(splitPath(form.value.path).rows)
 let syncingFromRows = false
 watch(
@@ -54,7 +50,6 @@ function onQueryRows(rows: KvRow[]): void {
   }
 }
 
-// ---------- 标签页 ----------
 const tab = ref('params')
 const queryCount = computed(() => queryRows.value.filter((r) => r.key.trim() !== '').length)
 const headerCount = computed(() => form.value.headers.filter((r) => r.key.trim() !== '').length)
@@ -91,7 +86,6 @@ function addExtract(): void {
   form.value.extracts.push({ var: '', from: 'json', expr: '' })
 }
 
-// ---------- 发送 ----------
 const sendBlocker = computed<string | null>(() => {
   if (ctx.blocker.value) return ctx.blocker.value
   if (!form.value.path.trim().startsWith('/')) return '路径必须以 / 开头'
@@ -112,7 +106,6 @@ async function send(): Promise<void> {
   })
   updatedVars.value = r ? ctx.applyExtracted(r) : []
 }
-/** 上一次发送后写回当前值的变量名 */
 const updatedVars = ref<string[]>([])
 const step = computed(() => result.value?.steps[0] ?? null)
 
@@ -125,7 +118,6 @@ function onKey(e: KeyboardEvent): void {
 onMounted(() => window.addEventListener('keydown', onKey))
 onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
-// ---------- 复制为 cURL ----------
 async function copyText(text: string): Promise<boolean> {
   // 服务通常跑在内网的 http 地址上，navigator.clipboard 只在安全上下文可用，所以留一条旧路
   try {
@@ -217,7 +209,6 @@ async function copyCurl(): Promise<void> {
           add-text="添加参数"
           @update:model-value="onQueryRows"
         />
-        <div class="form-hint">Query 参数就是路径里 ? 后面的内容：改这里，路径同步变；直接改路径也可以。</div>
       </el-tab-pane>
 
       <el-tab-pane name="headers">
@@ -226,31 +217,27 @@ async function copyCurl(): Promise<void> {
         </template>
         <div v-if="inheritedHeaders.length" class="inherited">
           <div class="inherited-title">
-            继承自环境「{{ ctx.environment.value?.name }}」<span class="muted">（只读，换环境会跟着变；在被测环境里修改）</span>
+            继承自「{{ ctx.environment.value?.name }}」
           </div>
           <div v-for="h in inheritedHeaders" :key="h.name" class="inherited-row" :class="{ 'is-overridden': h.overridden }">
             <span class="inherited-key">{{ h.name }}</span>
             <span class="inherited-value mono">{{ h.value }}</span>
-            <span v-if="h.overridden" class="inherited-note">被接口的同名请求头覆盖</span>
+            <span v-if="h.overridden" class="inherited-note">已覆盖</span>
           </div>
         </div>
-        <div v-if="inheritedHeaders.length" class="inherited-title own-title">接口自己的请求头</div>
+        <div v-if="inheritedHeaders.length" class="inherited-title own-title">接口</div>
         <KeyValueEditor
           v-model="form.headers"
           key-placeholder="请求头名称，如 Authorization"
           value-placeholder="值，可以用 {{变量名}}"
           add-text="添加请求头"
         />
-        <div class="form-hint">同名时以接口自己的为准。发送后在响应面板的“实际请求”里能看到合并后的结果。</div>
       </el-tab-pane>
 
       <el-tab-pane name="body">
         <template #label>请求体<span v-if="form.body" class="tab-dot" /></template>
         <div class="body-tools">
           <el-button size="small" :disabled="!bodyIsJsonLike" @click="formatBody">格式化 JSON</el-button>
-          <span class="form-hint body-hint">
-            留空表示不发送请求体。以 { 或 [ 开头且没写 Content-Type 时，自动按 application/json 发送。
-          </span>
         </div>
         <el-input v-model="form.body" type="textarea" :rows="8" class="mono" placeholder='{"orderId": "{{orderId}}"}' />
       </el-tab-pane>
@@ -262,7 +249,6 @@ async function copyCurl(): Promise<void> {
           </el-form-item>
           <el-form-item label="期望包含的文本">
             <el-input v-model="form.expectBodyContains" placeholder="留空表示不检查响应内容" />
-            <div class="form-hint">状态码和文本检查不通过会计入“检查通过率”，压测时据此判断测试是否有效。</div>
           </el-form-item>
         </el-form>
       </el-tab-pane>
@@ -280,9 +266,6 @@ async function copyCurl(): Promise<void> {
           </div>
           <el-button :icon="Plus" size="small" @click="addExtract">添加提取规则</el-button>
         </div>
-        <div class="form-hint">
-          从响应里取值存成变量，供同一流程的后续步骤用 <code v-pre>{{变量名}}</code> 引用。发送后在响应面板的“变量”里能看到取到了什么。
-        </div>
       </el-tab-pane>
 
       <el-tab-pane name="note" label="备注">
@@ -298,19 +281,14 @@ async function copyCurl(): Promise<void> {
     <section class="response">
       <div class="response-head">
         <span class="response-title">响应</span>
-        <span v-if="result" class="muted response-meta">
-          发往 {{ result.env.name }} · k6 用时 {{ formatMs(result.durationMs) }}（含启动）
-        </span>
         <span v-if="result && updatedVars.length" class="vars-updated">
-          已更新环境变量当前值：<span class="mono">{{ updatedVars.join('、') }}</span>
+          已更新变量 <span class="mono">{{ updatedVars.join('、') }}</span>
         </span>
       </div>
-      <div v-if="running" class="response-empty">正在通过 k6 向「{{ ctx.environment.value?.name }}」发送…</div>
+      <div v-if="running" class="response-empty">发送中…</div>
       <DebugErrorView v-else-if="error" :error="error" />
       <DebugStepPanel v-else-if="step" :step="step" />
-      <div v-else class="response-empty">
-        点“发送”后，这里显示响应、检查结果和提取到的变量。发送的是上面正在编辑的内容，不需要先保存。
-      </div>
+      <div v-else class="response-empty">点击发送查看响应</div>
     </section>
   </div>
 </template>

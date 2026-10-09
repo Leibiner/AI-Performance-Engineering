@@ -198,13 +198,12 @@ async function save(): Promise<void> {
   <div class="page">
     <PageHeader
       title="负载配置"
-      description="用多大的压力、压多久。负载配置不含地址和业务逻辑，同一个测试可以换不同的负载配置来运行。"
     >
       <el-button type="primary" :icon="Plus" @click="openCreate">新建负载配置</el-button>
     </PageHeader>
 
     <div class="panel">
-      <el-table v-loading="loading" :data="items" empty-text="还没有负载配置">
+      <el-table v-loading="loading" :data="items" empty-text="暂无数据">
         <el-table-column prop="name" label="名称" min-width="140" />
         <el-table-column label="类型" width="110">
           <template #default="{ row }">{{ PROFILE_TYPE_LABELS[(row as Profile).type] ?? row.type }}</template>
@@ -248,7 +247,6 @@ async function save(): Promise<void> {
           <el-select v-model="form.type" style="width: 220px">
             <el-option v-for="t in PROFILE_TYPE_OPTIONS" :key="t.value" :label="t.label" :value="t.value" />
           </el-select>
-          <div class="form-hint">只是分类标签，不影响执行方式。</div>
         </el-form-item>
 
         <el-form-item label="负载模型" required>
@@ -272,9 +270,6 @@ async function save(): Promise<void> {
           <el-radio-group v-model="form.shape">
             <el-radio-button v-for="s in shapeOptions" :key="s" :value="s">{{ SHAPES[s].label }}</el-radio-button>
           </el-radio-group>
-          <div class="form-hint">
-            {{ SHAPES[form.shape].description }}对应 k6 的 <code>{{ SHAPES[form.shape].executor }}</code>。
-          </div>
         </el-form-item>
 
         <!-- closed / 固定迭代数 -->
@@ -318,9 +313,6 @@ async function save(): Promise<void> {
           <el-form-item label="预分配并发数" required>
             <el-input-number v-model="form.preAllocatedVus" :min="1" :precision="0" controls-position="right" />
             <span class="unit">个虚拟用户</span>
-            <div class="form-hint">
-              为了维持到达率而预先准备的虚拟用户。不够用时 k6 会丢弃迭代，有效性检查会把这次运行判为“测试无效”。
-            </div>
           </el-form-item>
         </template>
 
@@ -358,14 +350,10 @@ async function save(): Promise<void> {
               </div>
               <el-button :icon="Plus" size="small" @click="addStage">添加阶段</el-button>
             </div>
-            <div class="form-hint">每个阶段在“用时”内，把到达率从上一个值线性变化到目标值。目标值与上一阶段相同表示保持不变。</div>
           </el-form-item>
           <el-form-item label="预分配并发数" required>
             <el-input-number v-model="form.preAllocatedVus" :min="1" :precision="0" controls-position="right" />
             <span class="unit">个虚拟用户</span>
-            <div class="form-hint">
-              为了维持到达率而预先准备的虚拟用户。不够用时 k6 会丢弃迭代，有效性检查会把这次运行判为“测试无效”。
-            </div>
           </el-form-item>
         </template>
 

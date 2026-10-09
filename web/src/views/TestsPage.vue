@@ -140,8 +140,6 @@ async function save(): Promise<void> {
   }
 }
 
-// ---------- 表格显示 ----------
-
 function flowShares(test: TestDef): { name: string; share: string }[] {
   const list = test.flows ?? []
   const total = list.reduce((sum, f) => sum + f.weight, 0)
@@ -150,8 +148,6 @@ function flowShares(test: TestDef): { name: string; share: string }[] {
     share: total > 0 ? formatPercent(f.weight / total, 1) : '',
   }))
 }
-
-// ---------- 发起运行 ----------
 
 const runDialogVisible = ref(false)
 const runTarget = ref<TestDef | null>(null)
@@ -165,13 +161,12 @@ function openRun(row: TestDef): void {
   <div class="page">
     <PageHeader
       title="测试"
-      description="一个测试 = 要执行哪些业务流程（按权重混合）+ 验收标准。发起运行时再选负载配置和被测环境。"
     >
       <el-button type="primary" :icon="Plus" @click="openCreate">新建测试</el-button>
     </PageHeader>
 
     <div class="panel">
-      <el-table v-loading="loading" :data="items" empty-text="还没有测试">
+      <el-table v-loading="loading" :data="items" empty-text="暂无数据">
         <el-table-column prop="name" label="名称" min-width="160" />
         <el-table-column label="业务流程（占比）" min-width="200">
           <template #default="{ row }">
@@ -253,7 +248,6 @@ function openRun(row: TestDef): void {
             </div>
             <el-button :icon="Plus" size="small" @click="addFlow">添加流程</el-button>
           </div>
-          <div class="form-hint">权重是相对比例，不需要加起来等于 1。例如 3 和 1 表示 75% 和 25%。</div>
         </el-form-item>
 
         <el-divider content-position="left">验收标准（留空表示不设这一项）</el-divider>
@@ -277,10 +271,6 @@ function openRun(row: TestDef): void {
           <span class="op">≥</span>
           <el-input-number v-model="form.checksRatePct" :min="0" :max="100" :controls="false" placeholder="默认 99" />
           <span class="unit">%</span>
-          <div class="form-hint">
-            “检查”指接口上设置的期望状态码和期望包含的文本。检查通过率属于有效性检查：不达标时运行会被判为“测试无效”，而不是“未达标”。留空时按默认的
-            99% 检查。
-          </div>
         </el-form-item>
 
         <el-form-item label="备注">

@@ -1,5 +1,3 @@
-// cURL 命令 ↔ 接口定义。导入：从浏览器开发者工具 / Postman / Apifox 复制的 curl 填进表单；
-// 导出：把当前接口在所选被测环境下实际会发的请求写成 curl，方便在终端里复现。
 import type { ApiDefInput, HttpMethod } from '../api'
 import { METHODS } from './method'
 

@@ -6,12 +6,9 @@ import type { ApiDef, Folder } from '../../api'
 import { buildFolderTree, type FolderNode } from '../../utils/folders'
 import { METHOD_COLOR } from '../../utils/method'
 
-// 接口页左栏：文件夹树 + 接口叶子，像 Postman 的集合树。文件夹可嵌套（项目 → 模块），非空不能删。
-// 规则只有一条：顶部"新建"建在根目录（接口、cURL 导入、文件夹）；要建在某个文件夹里，用那个文件夹的 … 菜单。
 interface TreeItem {
   key: string
   kind: 'folder' | 'api' | 'draft'
-  /** 搜索用的文本 */
   label: string
   folder?: Folder
   api?: ApiDef
@@ -60,7 +57,6 @@ const data = computed<TreeItem[]>(() => {
 })
 const isEmpty = computed(() => props.items.length === 0 && props.folders.length === 0 && props.draftFolderId === undefined)
 
-// ---------- 展开与高亮 ----------
 const expanded = ref<string[]>([])
 function onExpand(item: TreeItem): void {
   if (!expanded.value.includes(item.key)) expanded.value = [...expanded.value, item.key]
@@ -108,7 +104,6 @@ watch(
 )
 watch(data, applyCurrent)
 
-// ---------- 交互 ----------
 function onNodeClick(item: TreeItem): void {
   if (item.kind === 'api' && item.api) {
     activeKey.value = item.key
@@ -128,7 +123,6 @@ function onNewCommand(command: string): void {
   else if (command === 'folder') emit('create-folder', null)
 }
 
-// ---------- 搜索 ----------
 watch(keyword, (value) => treeRef.value?.filter(value.trim().toLowerCase()))
 // el-tree 的类型里节点数据是 Record<string, any>，这里按字段取
 function filterNode(value: string, item: Record<string, unknown>): boolean {
@@ -203,7 +197,7 @@ function filterNode(value: string, item: Record<string, unknown>): boolean {
           </div>
         </template>
       </el-tree>
-      <div v-if="isEmpty" class="api-list-empty">还没有接口。点“新建”：可以直接建接口、粘贴 cURL 导入，或先建文件夹按项目、模块分组。</div>
+      <div v-if="isEmpty" class="api-list-empty">暂无接口</div>
     </div>
   </aside>
 </template>

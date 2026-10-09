@@ -3,8 +3,6 @@ import { computed, onMounted } from 'vue'
 import { useDebugContext } from '../../composables/useDebugContext'
 import EnvTypeTag from '../EnvTypeTag.vue'
 
-// 当前调试环境的选择器。页头右上角、接口页请求栏的地址前缀、流程试跑对话框用的都是它，改的是同一个值。
-// seamless 时去掉边框，嵌进请求栏的地址框里。每次展开都重新拉一次列表，被测环境页上新建的马上能选。
 withDefaults(defineProps<{ seamless?: boolean }>(), { seamless: false })
 
 const { envId, environments, environment, loadEnvironments } = useDebugContext()

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Download, Loading, RefreshRight, TopRight, VideoPause } from '@element-plus/icons-vue'
-import { ApiError, environmentsApi, runsApi, type ArtifactName, type Run } from '../api'
+import { ApiError, environmentsApi, runsApi, type Run } from '../api'
 import type { StartEnv } from '../composables/useStartRun'
 import { useStartRun } from '../composables/useStartRun'
 import { confirmAction, errorMessage, showError } from '../utils/feedback'
@@ -44,8 +44,6 @@ const logTail = ref<string | null>(null)
 let pollTimer: number | undefined
 let tickTimer: number | undefined
 let disposed = false
-
-// ---------- 加载与轮询 ----------
 
 async function fetchRun(initial = false): Promise<void> {
   try {
@@ -106,8 +104,6 @@ onBeforeUnmount(() => {
   window.clearTimeout(pollTimer)
   window.clearInterval(tickTimer)
 })
-
-// ---------- 派生数据 ----------
 
 const isRunning = computed(() => run.value?.status === 'running')
 /** 已经请求停止、k6 还没退出 */
@@ -202,24 +198,15 @@ const overallGroups = computed(() => {
   ]
 })
 
-// ---------- k6 图表与产物 ----------
 // 只嵌入运行结束后导出的静态报告。不嵌入也不链接 k6 的实时仪表盘（5665 端口）：
 // 只要有浏览器连着它，k6 跑完后就不会退出，运行会一直停在“运行中”。
 
 const hasReport = computed(() => artifacts.value.includes('dashboard.html'))
 const reportUrl = computed(() => (run.value ? runsApi.artifactUrl(run.value.runId, 'dashboard.html') : ''))
 
-const ARTIFACT_DESCRIPTIONS: Record<ArtifactName, string> = {
-  'plan.json': '发起运行时的完整配置',
-  'run-record.json': '运行记录：判定、阈值结果、指标',
-  'k6-summary.json': 'k6 的原始汇总数据',
-  'dashboard.html': 'k6 图表报告',
-  'k6.log': 'k6 的输出日志',
-}
 const artifactLinks = computed(() =>
   artifacts.value.map((name) => ({
     name,
-    description: ARTIFACT_DESCRIPTIONS[name as ArtifactName] ?? '',
     url: runsApi.artifactUrl(props.runId, name),
     downloadUrl: runsApi.artifactUrl(props.runId, name, true),
   })),
@@ -228,8 +215,6 @@ const artifactLinks = computed(() =>
 const snapshot = computed(() => run.value?.snapshot ?? null)
 const snapshotJson = computed(() => (snapshot.value ? JSON.stringify(snapshot.value, null, 2) : ''))
 const snapshotOpen = ref<string[]>([])
-
-// ---------- 操作 ----------
 
 async function stopRun(): Promise<void> {
   if (!run.value) return
@@ -334,7 +319,6 @@ async function rerun(): Promise<void> {
     </el-result>
 
     <template v-else-if="run">
-      <!-- 页头：标题、操作、备注 -->
       <div class="page-header">
         <div>
           <router-link class="back-link" to="/runs">
@@ -366,7 +350,6 @@ async function rerun(): Promise<void> {
         <el-button :disabled="noteDraft === (run.note ?? '')" :loading="savingNote" @click="saveNote">保存备注</el-button>
       </div>
 
-      <!-- ==================== 运行中 ==================== -->
       <template v-if="isRunning">
         <div class="running-banner">
           <div class="running-main">
@@ -390,7 +373,6 @@ async function rerun(): Promise<void> {
         <div class="panel">
           <h2 class="panel-title">
             k6 进度
-            <small>k6 日志里最新的一行进度</small>
           </h2>
           <pre v-if="run.progress" class="code-block progress-line">{{ run.progress }}</pre>
           <p v-else class="muted empty-line">{{ stopping ? '已发出停止信号，等待 k6 退出…' : '等待 k6 输出进度…' }}</p>
@@ -404,18 +386,14 @@ async function rerun(): Promise<void> {
             <div v-if="run.executorName"><dt>执行机</dt><dd>{{ run.executorName }}</dd></div>
             <div><dt>开始时间</dt><dd class="num">{{ formatTime(run.startedAt) }}</dd></div>
           </dl>
-          <p class="form-hint">图表在运行结束后显示（k6 导出的报告）。</p>
         </div>
       </template>
 
-      <!-- ==================== 已结束：以下区块顺序固定 ==================== -->
       <template v-else>
-        <!-- 1. 判定横幅 -->
         <div class="verdict-banner" :style="{ background: verdictMeta?.color ?? '#6b7280' }">
           <div class="verdict-main">
             <div class="verdict-caption">判定</div>
             <div class="verdict-label">{{ verdictMeta?.label ?? '未知' }}</div>
-            <div class="verdict-desc">{{ verdictMeta?.description ?? '后端没有返回判定。' }}</div>
             <div v-if="record?.verdictReason" class="verdict-reason">原因：{{ record.verdictReason }}</div>
           </div>
           <dl class="verdict-meta">
@@ -447,11 +425,9 @@ async function rerun(): Promise<void> {
           </template>
         </div>
 
-        <!-- 2. 有效性检查 -->
         <div v-if="hasMetrics" class="panel">
           <h2 class="panel-title">
             有效性检查
-            <small>这次测试本身是否可信。任何一项未通过，判定为“测试无效”</small>
           </h2>
           <ThresholdTable v-if="validityThresholds.length" :thresholds="validityThresholds" />
           <p v-else class="muted empty-line">这次运行没有有效性检查项。</p>
@@ -459,25 +435,19 @@ async function rerun(): Promise<void> {
 
         <!-- 执行机在运行期间的资源占用。旧的运行记录没有这一项，不显示 -->
         <div v-if="executorStats" class="panel">
-          <h2 class="panel-title">
-            执行机
-            <small>{{ record?.executor?.name }}（发起压测的机器）在运行期间的资源占用。仅供参考，不参与判定</small>
-          </h2>
+          <h2 class="panel-title">执行机 <small>不参与判定</small></h2>
           <div class="stat-grid">
             <div v-for="item in executorStats" :key="item.label" class="stat">
               <div class="stat-label">{{ item.label }}</div>
               <div class="stat-value" :class="{ 'is-text': item.text }">{{ item.value }}</div>
             </div>
           </div>
-          <p v-if="record?.executor?.samples === 0" class="form-hint">运行期间没有采到样本（运行太短或采样失败），所以占用率为空。</p>
         </div>
 
         <template v-if="hasMetrics">
-          <!-- 3. 验收标准 -->
           <div class="panel">
             <h2 class="panel-title">
               验收标准
-              <small>被测系统是否达标。任何一项未通过，判定为“未达标”</small>
             </h2>
             <el-alert
               v-if="run.verdict === 'invalid'"
@@ -493,7 +463,6 @@ async function rerun(): Promise<void> {
             </div>
           </div>
 
-          <!-- 4. 总体指标 -->
           <div class="panel">
             <h2 class="panel-title">总体指标</h2>
             <template v-if="overall">
@@ -510,11 +479,9 @@ async function rerun(): Promise<void> {
             <p v-else class="muted empty-line">运行记录里没有总体指标。</p>
           </div>
 
-          <!-- 5. 分步骤指标表 -->
           <div class="panel">
             <h2 class="panel-title">
               分步骤指标
-              <small>响应时间单位：毫秒。请求数是 HTTP 请求数，重定向的每一跳各算一次</small>
             </h2>
             <el-table :data="steps" size="small" empty-text="运行记录里没有分步骤指标">
               <el-table-column v-if="multiFlow" prop="flowName" label="业务流程" min-width="140" />
@@ -550,22 +517,18 @@ async function rerun(): Promise<void> {
             </el-table>
           </div>
 
-          <!-- 6. 分步骤延迟柱状图 -->
           <div class="panel">
             <h2 class="panel-title">
               分步骤响应时间
-              <small>每个步骤的 p50 / p95 / p99</small>
             </h2>
             <StepLatencyChart v-if="chartable" :steps="steps" />
             <p v-else class="muted empty-line">没有分步骤数据可以画图。</p>
           </div>
         </template>
 
-        <!-- 7. k6 图表：dashboard.html 是可选产物，存在才显示这个区块 -->
         <div v-if="hasReport" class="panel">
           <h2 class="panel-title">
             k6 图表
-            <small>k6 在运行结束时导出的报告</small>
             <span class="panel-tools">
               <a class="open-link" :href="reportUrl" target="_blank" rel="noopener">
                 新窗口打开<el-icon><TopRight /></el-icon>
@@ -575,13 +538,11 @@ async function rerun(): Promise<void> {
           <iframe class="k6-frame" :src="reportUrl" title="k6 图表报告" loading="lazy" />
         </div>
 
-        <!-- 8. 产物链接 -->
         <div class="panel">
           <h2 class="panel-title">产物</h2>
           <ul v-if="artifactLinks.length" class="artifact-list">
             <li v-for="item in artifactLinks" :key="item.name">
               <a class="open-link mono" :href="item.url" target="_blank" rel="noopener">{{ item.name }}</a>
-              <span class="muted artifact-desc">{{ item.description }}</span>
               <a class="open-link" :href="item.downloadUrl">
                 <el-icon><Download /></el-icon>下载
               </a>
@@ -591,11 +552,9 @@ async function rerun(): Promise<void> {
         </div>
       </template>
 
-      <!-- 9. 运行时的配置快照（运行中也可以看） -->
       <div class="panel">
         <h2 class="panel-title">
           运行时的配置快照
-          <small>发起运行那一刻的完整配置。之后再修改定义，不影响这里</small>
         </h2>
         <template v-if="snapshot">
           <dl class="meta-grid snapshot-summary">
