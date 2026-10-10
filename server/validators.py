@@ -5,6 +5,7 @@
 多余的字段（id、createdAt、只读的展示字段等）直接忽略，方便前端把 GET 到的对象改完原样 PUT 回来。
 """
 
+import json
 import math
 import re
 import sqlite3
@@ -23,9 +24,23 @@ ENV_LIMITS = (
     ("maxRate", "maxRate（到达率上限，每秒迭代数）"),
     ("maxDurationSec", "maxDurationSec（时长上限，秒）"),
 )
-EXTRACT_FROM = ("json", "regex", "header")
+EXTRACT_FROM = ("json", "regex", "header", "cookie")
 SLO_KEYS = ("p95Ms", "p99Ms", "errorRate", "checksRate")
-VAR_NAME_RE = re.compile(r"^\w+$")  # 变量名：字母、数字、下划线（接口的提取规则、调试的初始变量共用）
+BODY_TYPES = ("raw", "form", "multipart")  # 接口页上 form 叫 x-www-form-urlencoded，multipart 叫 form-data
+PICKS = ("sequential", "random", "perVu")
+PICK_LABELS = {"sequential": "按顺序", "random": "随机", "perVu": "每个 VU 固定一行"}
+ON_EXHAUSTED = ("recycle", "stop")
+ON_EXHAUSTED_LABELS = {"recycle": "循环使用", "stop": "停止测试"}
+INIT_LABEL = "初始化（每个 VU 一次）"
+
+# 必须用 fullmatch：match 加 ^…$ 会放过结尾的换行。\w 含中文等各种文字的字母和数字，不含 $
+VAR_NAME_RE = re.compile(r"\w+")
+VAR_NAME_RULE = "只能由字母（含中文）、数字、下划线组成"
+
+
+def is_var_name(name: Any) -> bool:
+    """变量名规则（契约 §3.1「变量」）：环境变量、提取规则、数据集的列、流程变量、调试的当前值共用。"""
+    return isinstance(name, str) and VAR_NAME_RE.fullmatch(name) is not None
 
 
 def is_num(v: Any) -> bool:
@@ -33,7 +48,8 @@ def is_num(v: Any) -> bool:
 
 
 def is_int(v: Any) -> bool:
-    return isinstance(v, int) and not isinstance(v, bool)
+    # 超出 64 位的整数交给 sqlite 会抛 OverflowError，变成 500
+    return isinstance(v, int) and not isinstance(v, bool) and -(2**63) <= v < 2**63
 
 
 def base_url_problem(value: Any) -> str | None:
@@ -53,7 +69,7 @@ def base_url_problem(value: Any) -> str | None:
     return None
 
 
-class _Checker:
+class Checker:
     def __init__(self, data: Any):
         if not isinstance(data, dict):
             raise bad_request("请求体必须是 JSON 对象")
@@ -115,7 +131,7 @@ class _Checker:
 
 
 def validate_environment(data: Any, conn: sqlite3.Connection) -> dict:
-    c = _Checker(data)
+    c = Checker(data)
     out = {"name": c.name()}
     problem = base_url_problem(data.get("baseUrl"))
     if problem:
@@ -134,8 +150,10 @@ def validate_environment(data: Any, conn: sqlite3.Connection) -> dict:
             c.err("variables（环境变量）必须是对象（变量名 → 值）")
         else:
             for name, value in raw_vars.items():
-                if not isinstance(name, str) or not VAR_NAME_RE.match(name.strip()):
-                    c.err(f"环境变量名 {name!r} 只能包含字母、数字、下划线")
+                if not is_var_name(name.strip()):
+                    c.err(f"环境变量名 {name!r} {VAR_NAME_RULE}")
+                elif name.strip() in out["variables"]:
+                    c.err(f"环境变量名 {name.strip()} 重复")
                 elif not isinstance(value, str):
                     c.err(f"环境变量 {name} 的值必须是字符串")
                 else:
@@ -161,7 +179,7 @@ def validate_environment(data: Any, conn: sqlite3.Connection) -> dict:
     return out
 
 
-def _folder_id(c: _Checker, conn: sqlite3.Connection, key: str, label: str) -> int | None:
+def _folder_id(c: Checker, conn: sqlite3.Connection, key: str, label: str) -> int | None:
     """文件夹 id：null 表示根目录；否则必须是存在的文件夹。"""
     value = c.data.get(key)
     if value is None:
@@ -177,7 +195,7 @@ def _folder_id(c: _Checker, conn: sqlite3.Connection, key: str, label: str) -> i
 
 def validate_folder(data: Any, conn: sqlite3.Connection) -> dict:
     """接口文件夹。parentId 为 null 表示顶层；不能把文件夹放到自己或自己的子孙下面（PUT 时请求体里带 id）。"""
-    c = _Checker(data)
+    c = Checker(data)
     out: dict[str, Any] = {"name": c.name(), "note": c.note()}
     parent = _folder_id(c, conn, "parentId", "parentId（上级文件夹）")
     own = data.get("id")
@@ -201,7 +219,7 @@ def validate_folder(data: Any, conn: sqlite3.Connection) -> dict:
 
 
 def validate_api(data: Any, conn: sqlite3.Connection) -> dict:
-    c = _Checker(data)
+    c = Checker(data)
     out: dict[str, Any] = {"name": c.name()}
     out["folderId"] = _folder_id(c, conn, "folderId", "folderId（所属文件夹）")
 
@@ -221,11 +239,21 @@ def validate_api(data: Any, conn: sqlite3.Connection) -> dict:
 
     out["headers"] = c.headers()
 
+    body_type = data.get("bodyType")
+    if body_type is None:
+        body_type = "raw"
+    if body_type not in BODY_TYPES:
+        c.err("bodyType（请求体类型）必须是 raw / form（x-www-form-urlencoded）/ multipart（form-data）之一")
+        body_type = "raw"
+    out["bodyType"] = body_type
+
+    # body 和 form 都保存，只发送 bodyType 对应的那一个（切换类型不丢内容）
     body = data.get("body")
     if body is not None and not isinstance(body, str):
         c.err("body 必须是字符串或 null")
         body = None
     out["body"] = body or None
+    out["form"] = _form_items(c, conn, data.get("form"), body_type)
 
     status = data.get("expectStatus", 200)
     if not is_int(status) or not 100 <= status <= 599:
@@ -253,8 +281,8 @@ def validate_api(data: Any, conn: sqlite3.Connection) -> dict:
                 continue
             var, source, expr = item.get("var"), item.get("from"), item.get("expr")
             ok = True
-            if not isinstance(var, str) or not VAR_NAME_RE.match(var):
-                c.err(f"extracts 第 {i} 项的 var（变量名）必填，只能包含字母、数字、下划线")
+            if not is_var_name(var):
+                c.err(f"extracts 第 {i} 项的 var（变量名）必填，{VAR_NAME_RULE}")
                 ok = False
             elif var in seen:
                 c.err(f"extracts 第 {i} 项的变量名 {var} 重复")
@@ -274,36 +302,205 @@ def validate_api(data: Any, conn: sqlite3.Connection) -> dict:
     return out
 
 
+def _form_items(c: Checker, conn: sqlite3.Connection, items: Any, body_type: str) -> list[dict]:
+    """接口的表单项（契约 §3.1 form）。文本项的 fileId 规范成 null，文件项的 value 规范成空串。
+
+    bodyType 为 raw 时表单只是为了切换类型不丢内容而保留，不发送，所以不要求填完整：名称可以为空，文件项可以还没选文件。"""
+    active = body_type != "raw"
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        c.err("form（表单项）必须是数组")
+        return []
+    out: list[dict] = []
+    wanted: list[tuple[int, int]] = []  # (第几项, fileId)
+    for i, item in enumerate(items, 1):
+        where = f"form 第 {i} 项"
+        if not isinstance(item, dict):
+            c.err(f"{where}必须是对象")
+            continue
+        name, kind = item.get("name"), item.get("type")
+        ok = True
+        if not isinstance(name, str) or (active and not name.strip()):
+            c.err(f"{where}的 name（字段名）必填")
+            ok = False
+        if kind == "text":
+            value = item.get("value")
+            if value is None:
+                value = ""
+            if not isinstance(value, str):
+                c.err(f"{where}的 value 必须是字符串")
+                ok = False
+            entry = {"name": name, "type": "text", "value": value, "fileId": None}
+        elif kind == "file":
+            file_id = item.get("fileId")
+            if body_type == "form":
+                c.err(f"{where}是文件：x-www-form-urlencoded 请求体不能包含文件，上传文件请用 form-data")
+                ok = False
+            if file_id is None and not active:
+                pass
+            elif not is_int(file_id):
+                c.err(f"{where}是文件，fileId（文件）必填，且必须是整数")
+                ok = False
+            else:
+                wanted.append((i, file_id))
+            entry = {"name": name, "type": "file", "value": "", "fileId": file_id}
+        else:
+            c.err(f"{where}的 type 必须是 text（文本）或 file（文件）")
+            ok = False
+        if ok:
+            out.append(entry)
+    if wanted:
+        ids = sorted({file_id for _, file_id in wanted})
+        marks = ", ".join("?" for _ in ids)
+        known = {row[0] for row in conn.execute(f"SELECT id FROM files WHERE id IN ({marks})", ids)}
+        for i, file_id in wanted:
+            if file_id not in known:
+                c.err(f"form 第 {i} 项引用的文件 #{file_id} 不存在")
+    return out
+
+
+def _flow_steps(c: Checker, raw: Any, key: str, label: str, known: set[int]) -> list[dict]:
+    """steps / initSteps：[{apiId, thinkTimeMs}]。label 是提示里对一步的称呼。"""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        c.err(f"{key} 必须是数组")
+        return []
+    out = []
+    for i, step in enumerate(raw, 1):
+        if not isinstance(step, dict):
+            c.err(f"{label} {i} 必须是对象")
+            continue
+        api_id = step.get("apiId")
+        think = step.get("thinkTimeMs", 0)
+        if think is None:
+            think = 0
+        ok = True
+        if not is_int(api_id):
+            c.err(f"{label} {i} 的 apiId 必填，且必须是整数")
+            ok = False
+        elif api_id not in known:
+            c.err(f"{label} {i} 引用的接口 #{api_id} 不存在")
+            ok = False
+        if not is_num(think) or think < 0:
+            c.err(f"{label} {i} 的 thinkTimeMs 必须是不小于 0 的数字")
+            ok = False
+        if ok:
+            out.append({"apiId": api_id, "thinkTimeMs": think})
+    return out
+
+
+def _flow_datasets(c: Checker, conn: sqlite3.Connection, raw: Any) -> tuple[list[dict], dict[str, str]]:
+    """绑定的数据集。返回 (规范化的绑定, 列名 → 所属数据集的名称)。"""
+    if raw is None:
+        return [], {}
+    if not isinstance(raw, list):
+        c.err("datasets（绑定的数据集）必须是数组")
+        return [], {}
+    known = {row["id"]: row for row in conn.execute("SELECT id, name, columns FROM datasets")}
+    out: list[dict] = []
+    owners: dict[str, str] = {}
+    seen: set[int] = set()
+    picks = " / ".join(f"{p}（{PICK_LABELS[p]}）" for p in PICKS)
+    endings = " / ".join(f"{e}（{ON_EXHAUSTED_LABELS[e]}）" for e in ON_EXHAUSTED)
+    for i, item in enumerate(raw, 1):
+        where = f"数据集绑定第 {i} 项"
+        if not isinstance(item, dict):
+            c.err(f"{where}必须是对象")
+            continue
+        ds_id, pick, ending = item.get("datasetId"), item.get("pick"), item.get("onExhausted")
+        ok = True
+        row = None
+        if not is_int(ds_id):
+            c.err(f"{where}的 datasetId 必填，且必须是整数")
+            ok = False
+        elif ds_id not in known:
+            c.err(f"{where}引用的数据集 #{ds_id} 不存在")
+            ok = False
+        elif ds_id in seen:
+            c.err(f"数据集“{known[ds_id]['name']}”重复绑定：同一流程里每个数据集只能绑定一次")
+            ok = False
+        else:
+            row = known[ds_id]
+            seen.add(ds_id)
+        if pick not in PICKS:
+            c.err(f"{where}的 pick（取法）必须是 {picks} 之一")
+            ok = False
+        if ending not in ON_EXHAUSTED:
+            c.err(f"{where}的 onExhausted（用完时）必须是 {endings} 之一")
+            ok = False
+        elif pick == "random" and ending != "recycle":
+            c.err(f"{where}：取法为随机（random）时，用完时只能是循环使用（recycle）")
+            ok = False
+        if row is not None:
+            for column in json.loads(row["columns"]):
+                if column in owners:
+                    c.err(f"数据集“{owners[column]}”和“{row['name']}”都有列 {column}：同一流程绑定的数据集列名不能重复")
+                    ok = False
+                else:
+                    owners[column] = row["name"]
+        if ok:
+            out.append({"datasetId": ds_id, "pick": pick, "onExhausted": ending})
+    return out, owners
+
+
+def _flow_variables(c: Checker, raw: Any, owners: dict[str, str]) -> list[dict]:
+    """流程变量 [{name, value}]：每次迭代按顺序求值一次。"""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        c.err("variables（流程变量）必须是数组")
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    for i, item in enumerate(raw, 1):
+        where = f"流程变量第 {i} 项"
+        if not isinstance(item, dict):
+            c.err(f"{where}必须是对象")
+            continue
+        name, value = item.get("name"), item.get("value")
+        if isinstance(name, str):
+            name = name.strip()
+        if value is None:
+            value = ""
+        ok = True
+        if not is_var_name(name):
+            c.err(f"{where}的 name（变量名）必填，{VAR_NAME_RULE}")
+            ok = False
+        elif name in seen:
+            c.err(f"流程变量 {name} 重复")
+            ok = False
+        elif name in owners:
+            c.err(f"流程变量 {name} 和数据集“{owners[name]}”的列重名")
+            ok = False
+        if not isinstance(value, str):
+            c.err(f"{where}的 value 必须是字符串")
+            ok = False
+        if ok:
+            seen.add(name)
+            out.append({"name": name, "value": value})
+    return out
+
+
 def validate_flow(data: Any, conn: sqlite3.Connection) -> dict:
-    c = _Checker(data)
-    out: dict[str, Any] = {"name": c.name(), "note": c.note(), "steps": []}
-    steps = data.get("steps")
-    if steps is None:
-        steps = []
-    if not isinstance(steps, list):
-        c.err("steps 必须是数组")
-    else:
-        known = {row[0] for row in conn.execute("SELECT id FROM apis")}
-        for i, step in enumerate(steps, 1):
-            if not isinstance(step, dict):
-                c.err(f"步骤 {i} 必须是对象")
-                continue
-            api_id = step.get("apiId")
-            think = step.get("thinkTimeMs", 0)
-            if think is None:
-                think = 0
-            ok = True
-            if not is_int(api_id):
-                c.err(f"步骤 {i} 的 apiId 必填，且必须是整数")
-                ok = False
-            elif api_id not in known:
-                c.err(f"步骤 {i} 引用的接口 #{api_id} 不存在")
-                ok = False
-            if not is_num(think) or think < 0:
-                c.err(f"步骤 {i} 的 thinkTimeMs 必须是不小于 0 的数字")
-                ok = False
-            if ok:
-                out["steps"].append({"apiId": api_id, "thinkTimeMs": think})
+    c = Checker(data)
+    out: dict[str, Any] = {"name": c.name(), "note": c.note()}
+    known = {row[0] for row in conn.execute("SELECT id FROM apis")}
+    out["datasets"], owners = _flow_datasets(c, conn, data.get("datasets"))
+    out["variables"] = _flow_variables(c, data.get("variables"), owners)
+    raw_init = data.get("initSteps")
+    out["initSteps"] = _flow_steps(c, raw_init, "initSteps", f"{INIT_LABEL}步骤", known)
+    reinit = data.get("reinitSec")
+    if reinit is not None:
+        if not is_num(reinit) or reinit <= 0:
+            c.err("reinitSec（重新初始化间隔，秒）必须是正数，或 null 表示不重新初始化")
+            reinit = None
+        elif not (isinstance(raw_init, list) and raw_init):
+            c.err(f"{INIT_LABEL}没有步骤时，reinitSec（重新初始化间隔）必须为 null")
+            reinit = None
+    out["reinitSec"] = reinit
+    out["steps"] = _flow_steps(c, data.get("steps"), "steps", "步骤", known)
     c.done()
     return out
 
@@ -335,7 +532,7 @@ def config_shape_problem(model: Any, cfg: Any) -> str | None:
     return f"model 为 {model} 时，config 的字段必须恰好是：{allowed}。当前字段：{', '.join(sorted(keys)) or '（空）'}"
 
 
-def _validate_config(c: _Checker, model: str, cfg: Any) -> dict:
+def _validate_config(c: Checker, model: str, cfg: Any) -> dict:
     if not isinstance(cfg, dict):
         c.err("config 必填，且必须是对象")
         return {}
@@ -384,7 +581,7 @@ def _validate_config(c: _Checker, model: str, cfg: Any) -> dict:
 
 
 def validate_profile(data: Any, conn: sqlite3.Connection) -> dict:
-    c = _Checker(data)
+    c = Checker(data)
     out: dict[str, Any] = {"name": c.name()}
     kind = data.get("type")
     if kind not in PROFILE_TYPES:
@@ -403,7 +600,7 @@ def validate_profile(data: Any, conn: sqlite3.Connection) -> dict:
 
 
 def validate_test(data: Any, conn: sqlite3.Connection) -> dict:
-    c = _Checker(data)
+    c = Checker(data)
     out: dict[str, Any] = {"name": c.name(), "note": c.note(), "flows": []}
     flows = data.get("flows")
     if flows is None:

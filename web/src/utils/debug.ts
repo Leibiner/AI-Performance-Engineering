@@ -1,5 +1,5 @@
 // 调试结果的展示辅助：步骤状态、JSON 美化、检查汇总。
-import type { DebugStep, DebugStepStatus } from '../api'
+import type { DebugStep, DebugStepStatus, ExtractFrom } from '../api'
 
 export interface StepStatusMeta {
   label: string
@@ -37,4 +37,11 @@ export function formatChars(n: number | null | undefined): string {
   if (n < 1024) return `${n} 字符`
   if (n < 1024 * 1024) return `约 ${(n / 1024).toFixed(1)} KB`
   return `约 ${(n / 1024 / 1024).toFixed(2)} MB`
+}
+
+export const EXTRACT_FROM_LABELS: Record<ExtractFrom, string> = {
+  json: 'JSON',
+  regex: '正则',
+  header: '响应头',
+  cookie: 'Cookie',
 }

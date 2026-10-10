@@ -4,12 +4,19 @@ import type {
   ApiDef,
   ApiDefInput,
   ArtifactName,
+  Dataset,
+  DatasetData,
+  DatasetDetail,
+  DatasetInput,
+  DatasetPreview,
   DebugInput,
   DebugResult,
   Environment,
   EnvironmentInput,
   Executor,
   ExecutorInput,
+  FileAsset,
+  FileAssetInput,
   Flow,
   FlowInput,
   Folder,
@@ -64,6 +71,36 @@ export const apisApi = resource<ApiDef, ApiDefInput>('apis')
 export const flowsApi = resource<Flow, FlowInput>('flows')
 export const profilesApi = resource<Profile, ProfileInput>('profiles')
 export const testsApi = resource<TestDef, TestInput>('tests')
+
+export const datasetsApi = {
+  list: () => request<Dataset[]>('GET', '/datasets'),
+  get: (id: number) => request<DatasetDetail>('GET', `/datasets/${id}`),
+  create: (input: DatasetInput) => request<Dataset>('POST', '/datasets', { body: input }),
+  /** 不带 csv / contentBase64 时数据不变 */
+  update: (id: number, input: DatasetInput) => request<Dataset>('PUT', `/datasets/${id}`, { body: input }),
+  /** 被业务流程绑定时 409，details 列出这些流程 */
+  remove: async (id: number) => {
+    await request<unknown>('DELETE', `/datasets/${id}`)
+  },
+  /** 只解析不保存；解析不通过 400，details 和保存时一致 */
+  preview: (data: DatasetData) => request<DatasetPreview>('POST', '/datasets/preview', { body: data }),
+  /** 导出的 CSV 文本，已去掉开头的 BOM */
+  csvText: async (id: number) => (await requestText(`/datasets/${id}/csv`)).replace(/^\uFEFF/, ''),
+  csvUrl: (id: number, download = false) => apiUrl(`/datasets/${id}/csv${download ? '?download=1' : ''}`),
+}
+
+export const filesApi = {
+  list: () => request<FileAsset[]>('GET', '/files'),
+  get: (id: number) => request<FileAsset>('GET', `/files/${id}`),
+  create: (input: FileAssetInput) => request<FileAsset>('POST', '/files', { body: input }),
+  /** 不带 contentBase64 时内容不变 */
+  update: (id: number, input: FileAssetInput) => request<FileAsset>('PUT', `/files/${id}`, { body: input }),
+  /** 被接口引用时 409，details 列出这些接口 */
+  remove: async (id: number) => {
+    await request<unknown>('DELETE', `/files/${id}`)
+  },
+  contentUrl: (id: number, download = false) => apiUrl(`/files/${id}/content${download ? '?download=1' : ''}`),
+}
 
 function runPath(runId: string): string {
   return `/runs/${encodeURIComponent(runId)}`

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { DebugStep } from '../../api'
-import { STEP_STATUS, checksSummary, formatChars, tryPrettyJson } from '../../utils/debug'
-import { formatMs } from '../../utils/format'
+import { EXTRACT_FROM_LABELS, STEP_STATUS, checksSummary, formatChars, tryPrettyJson } from '../../utils/debug'
+import { formatBytes, formatMs } from '../../utils/format'
 import { STATUS_STYLE, statusKind, statusLabel } from '../../utils/http-status'
 
 const props = defineProps<{ step: DebugStep }>()
@@ -27,6 +27,8 @@ function rows(record: Record<string, string> | null | undefined): Row[] {
 const responseHeaders = computed(() => rows(props.step.response?.headers))
 const requestHeaders = computed(() => rows(props.step.request?.headers))
 const varRows = computed(() => rows(props.step.vars))
+const requestForm = computed(() => props.step.request?.form ?? null)
+const formTitle = computed(() => (props.step.request?.bodyType === 'multipart' ? 'form-data' : 'x-www-form-urlencoded'))
 
 const timingRows = computed(() => {
   const t = props.step.timings
@@ -125,7 +127,7 @@ const timingRows = computed(() => {
                 <tr v-for="e in step.extracted" :key="e.var" :class="e.ok ? '' : 'is-bad'">
                   <th class="mono">{{ e.var }}</th>
                   <td>
-                    <span class="muted">{{ e.from }} · </span><span class="mono">{{ e.expr }}</span>
+                    <span class="muted">{{ EXTRACT_FROM_LABELS[e.from] ?? e.from }} · </span><span class="mono">{{ e.expr }}</span>
                   </td>
                   <td class="mono">{{ e.ok ? e.value : '没取到' }}</td>
                 </tr>
@@ -159,8 +161,23 @@ const timingRows = computed(() => {
                 </tr>
               </tbody>
             </table>
+            <template v-if="requestForm">
+              <div class="sub-title">{{ formTitle }}</div>
+              <table class="kv-table">
+                <tbody>
+                  <tr v-for="(item, index) in requestForm" :key="index">
+                    <th class="mono">{{ item.name }}</th>
+                    <td v-if="item.type === 'file'">
+                      <span class="mono">{{ item.fileName }}</span>
+                      <span class="muted"> · {{ item.contentType }} · {{ formatBytes(item.size) }}</span>
+                    </td>
+                    <td v-else class="mono">{{ item.value }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </template>
             <template v-if="step.request.body !== null">
-              <div class="sub-title">请求体</div>
+              <div class="sub-title">{{ requestForm ? '编码后的请求体' : '请求体' }}</div>
               <pre class="code-block">{{ step.request.body }}</pre>
             </template>
           </template>

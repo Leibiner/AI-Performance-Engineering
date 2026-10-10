@@ -12,6 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 2026-10-09 加入**调试**：接口页是 Postman 式工作台，能把正在编辑的接口用真实 k6 发送一次看响应；业务流程页能试跑一次迭代；支持从 cURL 导入接口。OpenAPI / Postman Collection 导入**未做**。
 - 2026-10-09 加入**环境变量**（`environments.variables`，表结构版本 4）：初始值进 plan 的 `env.variables`，每次迭代从它开始；调试的当前值按环境存在浏览器里，提取到的变量自动写回。接口页请求头显示继承自环境的请求头。
 - 2026-10-09 加入**接口文件夹**（`folders` 表，可嵌套；`apis.folder_id`，表结构版本 3）：只用于页面分组，不进 plan、不影响运行；非空文件夹不能删。
+- 2026-10-10 加入**测试数据与变量分层**（ADR-006，表结构版本 5）：数据集（`datasets`，CSV 由后端解析，绑定在业务流程上，按顺序 / 随机 / 每个 VU 固定一行，用完时循环或判 `invalid`）、文件（`files`，multipart 上传用）、流程变量、动态变量 `{{$uuid}}` 等、业务流程的初始化段（每个 VU 一次，不计入业务 SLO）、请求体 raw / x-www-form-urlencoded / form-data、提取支持 GJSON 和 Cookie。预检静态检查变量来源；流程试跑不再用浏览器里的当前值；调试单个接口可以先跑上游接口、选一行数据。分层和字段见契约 §3.1「变量」、§3.6、§3.7、§4。
 
 ## 命令
 
@@ -68,9 +69,9 @@ K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --por
 |---|---|---|
 | `perf/` | k6 执行引擎：通用脚本读取 `plan.json` 解释执行；`core/` 生成 scenarios、阈值、Run Record | `perf/runner.js` |
 | `server/` | 后端：Python 3.12 + FastAPI + 标准库 `sqlite3`。增删改查、预检、启动和停止 k6、最终判定、存档、托管前端 | `server/main.py` |
-| `web/` | 前端：Vue 3 + TypeScript + Vite + Element Plus + ECharts，9 个页面 | `web/src/router.ts` |
+| `web/` | 前端：Vue 3 + TypeScript + Vite + Element Plus + ECharts，10 个页面 | `web/src/router.ts` |
 
-一次运行的路径：页面 `POST /api/runs` → 后端预检 → 把测试、流程、接口、负载配置、环境展开成 `results/<runId>/plan.json`（同时作为快照存库）→ 启动 k6 子进程 → `handleSummary` 写 `run-record.json` → 后端按退出码和 `k6Verdict` 得出最终判定，补全 Run Record 后存库。完整的数据流见 `ARCHITECTURE.md` §3.4。`results/<runId>/` 里只有 5 个产物：`plan.json`、`run-record.json`、`k6-summary.json`、`dashboard.html`、`k6.log`，产物接口只认这 5 个文件名（`server/runs.py` 的 `ARTIFACTS`）。
+一次运行的路径：页面 `POST /api/runs` → 后端预检 → 把测试、流程、接口、负载配置、环境展开成 `results/<runId>/plan.json`（同时作为快照存库）→ 启动 k6 子进程 → `handleSummary` 写 `run-record.json` → 后端按退出码和 `k6Verdict` 得出最终判定，补全 Run Record 后存库。完整的数据流见 `ARCHITECTURE.md` §3.4。`results/<runId>/` 里的产物只有 5 个：`plan.json`、`run-record.json`、`k6-summary.json`、`dashboard.html`、`k6.log`，产物接口只认这 5 个文件名（`server/runs.py` 的 `ARTIFACTS`）；用到数据集或文件时，旁边另有 `datasets/`、`files/` 两个目录，是 k6 的输入（行数据不进 plan 和快照），不经产物接口提供。
 
 调试的路径：页面 `POST /api/debug`（一份接口定义或一个流程 id + 被测环境）→ 后端组装成 1 并发、1 次迭代、带 `debug` 段的 plan，写到 `results/_debug/<debugId>/` → 以调试模式启动 k6（`--no-thresholds --quiet --log-format=json --console-output=…`，不开仪表盘）→ 引擎迭代结束时把逐步记录 `console.log` 成一行 JSON → 后端解析后同步返回，目录读完即删（`server/debug.py`）。调试不留运行记录，和运行互斥（`server/runs.py` 的 `claim_debug_slot`）。约定见契约 §3.5、§4 `debug`、§5.1。
 
@@ -79,7 +80,7 @@ K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --por
 - `server/` 不 import `perf/`：两边只通过 `plan.json`、命令行参数、退出码和 `results/` 里的文件交互。
 - 前端页面只通过 `web/src/api/` 访问后端，不直接写 fetch。
 - **前端面向有经验的用户**：页面上不写说明性文案（页头描述、表单提示、区块副标题、长空状态），只保留安全警示（生产确认、超出安全上限）和错误信息；代码注释只写不显而易见的约束，不写文件头叙述、分节线和复述代码的注释。
-- 业务流程是数据，不是代码：新增流程不加文件。`runner.js` 只导出一个执行函数 `runFlow`，用 scenario 名（= 流程的 `key`）找回对应的流程。每一步按 `{{变量}}` 替换 → 发请求 → check → 提取变量 → 等待 `thinkTimeMs` 执行；变量的作用域是一次迭代，某一步的 check 没通过时本次迭代剩下的步骤不再执行（`perf/core/interp.js`）。
+- 业务流程是数据，不是代码：新增流程不加文件。`runner.js` 只导出一个执行函数 `runFlow`，用 scenario 名（= 流程的 `key`）找回对应的流程。一次迭代：取数据集的行 → 求流程变量 → 需要时执行初始化段（每个 VU 一次，输出跨迭代保留）→ 执行每次迭代的步骤；每一步按 `{{变量}}` 替换 → 发请求 → check → 提取变量 → 等待 `thinkTimeMs`。变量按求值顺序分层、后写的覆盖先写的（环境 → 数据集 → 流程变量 → 初始化段输出 → 步骤提取），某一步的 check 没通过时本次迭代剩下的步骤不再执行（`perf/core/interp.js`）。
 - 数据在 `data/app.db`（SQLite 单文件）。种子数据在 `server/seed.py`，只在全新的库里写一次；改了种子要删库才会生效。
 - **改表结构要写迁移，不能删库**：库里有用户的真实数据。表结构版本记在 `PRAGMA user_version`，在 `server/db.py` 里把 `SCHEMA_VERSION` 加 1 并加一段迁移（备份 → 一个事务内迁移 → 写版本号），先在库的拷贝上验证，再重启正式服务。迁移前会自动备份到 `data/app.db.v<旧版本>.bak`（已存在则不覆盖）；迁移后不能直接回退旧代码，要先用备份还原。
 - **两种"环境"不要混用**：**执行机**（`executors`）是安装了本项目、实际运行 k6 的机器，目前只有本机一台，不能新增和删除；**被测环境**（`environments`）是被压测的目标，有类型 `dev / test / staging / prod`。被测环境上的 `maxVus`、`maxRate`、`maxDurationSec` 是**安全上限**（只在预检时用来拒绝超限的运行），不是负载配置。
@@ -137,6 +138,8 @@ K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --por
 - 退出码：0 阈值全过；99 有阈值未过（未达标和测试无效都是 99）；107 plan 无效或脚本异常；105 被中断。后端另外认得 110（脚本调用 `exec.test.fail()`，判 `failed`）和 108（`test.abort()`，判 `aborted`）。最终判定顺序：有停止请求或 105 / 108 → `aborted`；没有 `run-record.json` 或其他退出码 → `error`；然后按 `k6Verdict` 得 `invalid` / `failed` / `passed`（`server/runs.py` 的 `_decide`）。
 - `open()` 的相对路径相对脚本所在目录，所以 `PLAN_FILE` 必须是绝对路径。
 - 到达率必须是整数，小数到达率用 `timeUnit` 换算。
+- **未知的 import 会联网**：k6 默认开启 Automatic extension resolution，import 一个不存在的模块会向 Grafana 的构建服务请求下载扩展。后端和 `scripts/env.sh` 都设了 `K6_AUTO_EXTENSION_RESOLUTION=false`；手动运行 k6 也要带上。没有非 experimental 的 CSV 模块，CSV 一律由后端解析。
+- 数据集用 `SharedArray` 从运行目录里的 JSON 文件加载（同名会串数据，名字带内容摘要），不要内嵌进 plan：plan 被每个 VU 各解析一次。`exec.scenario.iterationInTest` 按 scenario 各自从 0 开始。数据用完的停止靠 `data_exhausted` 计数 + `abortOnFail` 阈值（退出码 99、判 `invalid`），不用 `test.abort()`（108，会被判 `aborted`）。
 
 研究阶段的结论和来源见 `docs/research/k6.md` 与 `docs/research/k6-ecosystem.md`。
 
@@ -144,7 +147,7 @@ K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --por
 
 ```text
 docs/ARCHITECTURE.md   L1 唯一的架构与总体说明；与其他文档冲突时以它为准
-docs/decisions/        L2 ADR-001–005：为什么这样设计（ADR-004 的"只读"已被 ADR-005 取代）
+docs/decisions/        L2 ADR-001–006：为什么这样设计（ADR-004 的"只读"已被 ADR-005 取代）
 docs/plans/            L2 roadmap.md、mvp-plan.md、mvp-contract.md（三方接口约定）、ai-opportunity-map.md
 docs/records/          L2 commit-log.md（提交记录）、tech-notes.md（技术笔记）
 docs/research/         L3 研究记录与来源；只作为依据，不随实现频繁更新
@@ -168,5 +171,6 @@ docs/research/         L3 研究记录与来源；只作为依据，不随实现
 - **执行机过载是否判 `invalid`**：现在只展示采样结果。
 - **CI 的入口和平台**：没有命令行入口。是让 CI 调用后端接口，还是"plan 文件 + 命令行"（`ARCHITECTURE.md` §3.8）；平台未定。
 - **基线、历史、实验记录的存储形态**：放数据库，还是放 git 以保留审核（`ARCHITECTURE.md` §3.7）。
-- **流程的表达力**：需要分支、循环、轮询或数据集时，是扩展数据模型，还是引入手写 JS 模块作为第二种流程类型（ADR-005）。
+- **流程的表达力**：数据集、每 VU 登录一次已按 ADR-006 用扩展数据模型解决；分支、循环、轮询仍未决（扩展数据模型，还是引入手写 JS 模块作为第二种流程类型，ADR-005）。
+- **凭据**：环境变量和请求头里的密码、token 明文存库，并进入快照和可下载的 `plan.json`（ADR-005、ADR-006 都已登记，未处理）。
 - **TOB 目标系统**：自建多租户 mock 还是接入真实系统。

@@ -9,6 +9,8 @@ JSON 类字段存 TEXT，数值类字段用 NUMERIC（整数存整数，小数�
   2  environments 增加 type、三个安全上限可为空；新增 executors；runs 增加 env_type、executor_id、executor_name
   3  新增 folders（接口文件夹，可嵌套）；apis 增加 folder_id
   4  environments 增加 variables（环境变量的初始值）
+  5  新增 datasets（数据集）、files（文件）；flows 增加 init_steps、datasets、variables、reinit_sec；
+     apis 增加 body_type、form
 全新的库直接建成最新结构；旧库在启动时逐级迁移，迁移前先备份，整个迁移在一个事务里。
 """
 
@@ -23,7 +25,7 @@ from . import config
 
 log = logging.getLogger("uvicorn.error")
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 LOCAL_EXECUTOR_NAME = "本机执行机"
 
@@ -67,11 +69,55 @@ CREATE TABLE IF NOT EXISTS folders (
     updated_at TEXT NOT NULL
 )"""
 
+# rows 是整张表的行（JSON 数组，每行一个字符串数组），列表接口不读它
+_DATASETS_DDL = """
+CREATE TABLE IF NOT EXISTS datasets (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    note       TEXT NOT NULL DEFAULT '',
+    columns    TEXT NOT NULL DEFAULT '[]',
+    rows       TEXT NOT NULL DEFAULT '[]',
+    row_count  INTEGER NOT NULL DEFAULT 0,
+    sha256     TEXT NOT NULL DEFAULT '',
+    source     TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)"""
+
+_FILES_DDL = """
+CREATE TABLE IF NOT EXISTS files (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size         INTEGER NOT NULL DEFAULT 0,
+    sha256       TEXT NOT NULL DEFAULT '',
+    data         BLOB NOT NULL,
+    note         TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL
+)"""
+
+# 版本 5 加的列：迁移时逐个 ADD COLUMN，全新的库由 _SCHEMA 直接建出来，两处要一致
+_V5_COLUMNS = {
+    "flows": (
+        ("init_steps", "TEXT NOT NULL DEFAULT '[]'"),
+        ("datasets", "TEXT NOT NULL DEFAULT '[]'"),
+        ("variables", "TEXT NOT NULL DEFAULT '[]'"),
+        ("reinit_sec", "NUMERIC"),
+    ),
+    "apis": (
+        ("body_type", "TEXT NOT NULL DEFAULT 'raw'"),
+        ("form", "TEXT NOT NULL DEFAULT '[]'"),
+    ),
+}
+
 # 最新结构。全部是 IF NOT EXISTS，每次启动执行一遍
 _SCHEMA = [
     _environments_ddl(),
     _EXECUTORS_DDL,
     _FOLDERS_DDL,
+    _DATASETS_DDL,
+    _FILES_DDL,
     """
 CREATE TABLE IF NOT EXISTS apis (
     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,7 +126,9 @@ CREATE TABLE IF NOT EXISTS apis (
     method               TEXT NOT NULL,
     path                 TEXT NOT NULL,
     headers              TEXT NOT NULL DEFAULT '{}',
+    body_type            TEXT NOT NULL DEFAULT 'raw',
     body                 TEXT,
+    form                 TEXT NOT NULL DEFAULT '[]',
     expect_status        INTEGER NOT NULL DEFAULT 200,
     expect_body_contains TEXT,
     extracts             TEXT NOT NULL DEFAULT '[]',
@@ -93,6 +141,10 @@ CREATE TABLE IF NOT EXISTS flows (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL,
     note       TEXT NOT NULL DEFAULT '',
+    datasets   TEXT NOT NULL DEFAULT '[]',
+    variables  TEXT NOT NULL DEFAULT '[]',
+    init_steps TEXT NOT NULL DEFAULT '[]',
+    reinit_sec NUMERIC,
     steps      TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -147,7 +199,7 @@ CREATE TABLE IF NOT EXISTS runs (
     "CREATE INDEX IF NOT EXISTS idx_runs_test ON runs (test_id, started_at DESC)",
 ]
 
-DEFINITION_TABLES = ("environments", "folders", "apis", "flows", "profiles", "tests")
+DEFINITION_TABLES = ("environments", "folders", "apis", "flows", "datasets", "files", "profiles", "tests")
 
 
 @contextmanager
@@ -266,6 +318,28 @@ def _migrate_v3_to_v4(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE environments ADD COLUMN variables TEXT NOT NULL DEFAULT '{}'")
 
 
+def _needs_v5(conn: sqlite3.Connection) -> bool:
+    if not (_has_table(conn, "datasets") and _has_table(conn, "files")):
+        return True
+    return any(
+        column not in _columns(conn, table)
+        for table, columns in _V5_COLUMNS.items()
+        for column, _ in columns
+    )
+
+
+def _migrate_v4_to_v5(conn: sqlite3.Connection) -> None:
+    """版本 4 → 5：数据集、文件两张表；流程的初始化段、数据集绑定、流程变量；接口的请求体类型和表单。
+    旧流程这几项为空（行为和以前一样），旧接口的请求体类型为 raw。"""
+    conn.execute(_DATASETS_DDL)
+    conn.execute(_FILES_DDL)
+    for table, columns in _V5_COLUMNS.items():
+        existing = _columns(conn, table)
+        for column, ddl in columns:
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+
+
 def init() -> bool:
     """建表或迁移（幂等）。返回 True 表示这是一个全新的库，需要写入种子数据。"""
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -319,7 +393,19 @@ def init() -> bool:
                 log.error("数据库迁移失败，已回滚，库文件没有被改动：%s", config.DB_PATH)
                 raise
             log.info("数据库已从版本 3 迁移到版本 4：%s", config.DB_PATH)
-        # 以后的迁移接在这里：if 结构还是版本 4：备份 → BEGIN → _migrate_v4_to_v5 → user_version = 5 → COMMIT
+        if existed and _needs_v5(conn):
+            _backup(conn, 4)
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                _migrate_v4_to_v5(conn)
+                conn.execute("PRAGMA user_version = 5")
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                log.error("数据库迁移失败，已回滚，库文件没有被改动：%s", config.DB_PATH)
+                raise
+            log.info("数据库已从版本 4 迁移到版本 5：%s", config.DB_PATH)
+        # 以后的迁移接在这里：if 结构还是版本 5：备份 → BEGIN → _migrate_v5_to_v6 → user_version = 6 → COMMIT
 
         conn.execute("BEGIN IMMEDIATE")
         try:

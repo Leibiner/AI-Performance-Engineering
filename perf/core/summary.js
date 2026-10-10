@@ -9,7 +9,7 @@
 //   data.state.testRunDurationMs
 //   子指标的名称形如 "http_req_duration{step:f1s1}"，只有被阈值引用过才会出现
 
-import { KIND_SLO, KIND_VALIDITY, KIND_PLACEHOLDER, stepDurationMetric, stepFailedMetric } from './thresholds.js';
+import { KIND_SLO, KIND_VALIDITY, KIND_PLACEHOLDER, stepDurationMetric, stepFailedMetric, hasInitSteps, overallMetric } from './thresholds.js';
 
 function num(metrics, name, key) {
   const m = metrics[name];
@@ -45,22 +45,31 @@ export function computeVerdict(thresholds) {
   return 'passed';
 }
 
-function overallMetrics(metrics) {
+// 有初始化段时，请求数、响应时间、错误率只算每次迭代的步骤（契约 §5）；迭代、检查、流量始终按全部
+function overallMetrics(metrics, plan) {
   const vusMax = num(metrics, 'vus_max', 'max');
+  const reqs = overallMetric(plan, 'http_reqs');
+  const d = overallMetric(plan, 'http_req_duration');
+  const f = overallMetric(plan, 'http_req_failed');
+  const count = num(metrics, reqs, 'count') || 0;
+  // 被阈值引用的指标没有样本时 k6 给出的是 0，这里改成 null，避免被当成"响应时间 0 ms""错误率 0"
+  const has = count > 0;
+  const hasChecks = (num(metrics, 'checks', 'passes') || 0) + (num(metrics, 'checks', 'fails') || 0) > 0;
   return {
-    reqs: num(metrics, 'http_reqs', 'count') || 0,
-    rps: round(num(metrics, 'http_reqs', 'rate') || 0, 3),
+    scope: hasInitSteps(plan) ? 'main' : 'all',
+    reqs: count,
+    rps: round(num(metrics, reqs, 'rate') || 0, 3),
     iterations: num(metrics, 'iterations', 'count') || 0,
     droppedIterations: num(metrics, 'dropped_iterations', 'count') || 0,
     vusMax: vusMax !== null ? vusMax : num(metrics, 'vus_max', 'value'),
-    avg: ms(num(metrics, 'http_req_duration', 'avg')),
-    p50: ms(num(metrics, 'http_req_duration', 'med')),
-    p90: ms(num(metrics, 'http_req_duration', 'p(90)')),
-    p95: ms(num(metrics, 'http_req_duration', 'p(95)')),
-    p99: ms(num(metrics, 'http_req_duration', 'p(99)')),
-    max: ms(num(metrics, 'http_req_duration', 'max')),
-    errorRate: round(num(metrics, 'http_req_failed', 'rate'), 6),
-    checksRate: round(num(metrics, 'checks', 'rate'), 6),
+    avg: has ? ms(num(metrics, d, 'avg')) : null,
+    p50: has ? ms(num(metrics, d, 'med')) : null,
+    p90: has ? ms(num(metrics, d, 'p(90)')) : null,
+    p95: has ? ms(num(metrics, d, 'p(95)')) : null,
+    p99: has ? ms(num(metrics, d, 'p(99)')) : null,
+    max: has ? ms(num(metrics, d, 'max')) : null,
+    errorRate: has ? round(num(metrics, f, 'rate'), 6) : null,
+    checksRate: hasChecks ? round(num(metrics, 'checks', 'rate'), 6) : null,
     dataReceived: num(metrics, 'data_received', 'count') || 0,
     dataSent: num(metrics, 'data_sent', 'count') || 0,
   };
@@ -69,7 +78,8 @@ function overallMetrics(metrics) {
 function stepMetrics(metrics, plan) {
   const steps = [];
   for (const flow of plan.flows) {
-    for (const step of flow.steps) {
+    const all = (flow.initSteps || []).map((step) => [step, 'init']).concat(flow.steps.map((step) => [step, 'main']));
+    for (const [step, phase] of all) {
       const d = stepDurationMetric(step.key);
       const f = stepFailedMetric(step.key);
       // rate 指标的 passes + fails = 样本数 = 这一步发出的请求数
@@ -80,6 +90,7 @@ function stepMetrics(metrics, plan) {
         flowName: flow.name,
         stepKey: step.key,
         stepName: step.name,
+        phase,
         count,
         // 没有样本时 k6 给出的是 0，这里改成 null，避免被当成"响应时间 0 ms"
         avg: has ? ms(num(metrics, d, 'avg')) : null,
@@ -102,7 +113,7 @@ export function buildRunRecord(data, plan, thresholdMeta) {
     k6Verdict: computeVerdict(thresholds),
     thresholds,
     metrics: {
-      overall: overallMetrics(data.metrics),
+      overall: overallMetrics(data.metrics, plan),
       steps: stepMetrics(data.metrics, plan),
     },
     testDurationMs: data.state && typeof data.state.testRunDurationMs === 'number' ? Math.round(data.state.testRunDurationMs) : null,
@@ -129,14 +140,14 @@ function textSummary(record, plan) {
     '',
     `运行 ${record.runId}｜测试：${plan.test ? plan.test.name : '-'}｜负载：${plan.profile.name || '-'}（${plan.profile.model}）`,
     `k6 判定：${VERDICT_TEXT[record.k6Verdict]}`,
-    `请求 ${o.reqs} 次（${fmt(o.rps)} 次/秒），迭代 ${o.iterations} 次，丢弃 ${o.droppedIterations} 次，错误率 ${pct(o.errorRate)}，检查通过率 ${pct(o.checksRate)}`,
+    `${o.scope === 'main' ? '业务请求（不含初始化段）' : '请求'} ${o.reqs} 次（${fmt(o.rps)} 次/秒），迭代 ${o.iterations} 次，丢弃 ${o.droppedIterations} 次，错误率 ${pct(o.errorRate)}，检查通过率 ${pct(o.checksRate)}`,
     `响应时间 avg ${fmt(o.avg, ' ms')}｜p95 ${fmt(o.p95, ' ms')}｜p99 ${fmt(o.p99, ' ms')}｜max ${fmt(o.max, ' ms')}`,
   ];
   for (const t of record.thresholds) {
     lines.push(`  [${t.ok ? '通过' : '未通过'}] ${t.kind === KIND_SLO ? 'SLO' : '有效性'}：${t.label}`);
   }
   for (const s of record.metrics.steps) {
-    lines.push(`  步骤 ${s.stepKey} ${s.stepName}：${s.count} 次，p95 ${fmt(s.p95, ' ms')}，错误率 ${pct(s.errorRate)}`);
+    lines.push(`  ${s.phase === 'init' ? '初始化' : '步骤'} ${s.stepKey} ${s.stepName}：${s.count} 次，p95 ${fmt(s.p95, ' ms')}，错误率 ${pct(s.errorRate)}`);
   }
   lines.push('');
   return lines.join('\n');

@@ -17,6 +17,8 @@ export const TREND_STATS = ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)
 const GRACEFUL_STOP = '5s';
 
 const KEY_PATTERN = /^[A-Za-z0-9_]+$/;
+const PICKS = ['sequential', 'random', 'perVu'];
+const BODY_TYPES = ['raw', 'form', 'multipart'];
 
 function fail(msg) {
   throw new Error(`plan 无效：${msg}`);
@@ -42,21 +44,65 @@ export function validatePlan(plan) {
   }
   if (!Array.isArray(plan.flows) || plan.flows.length === 0) fail('flows 不能为空');
   const seen = {};
+  const datasets = {};
+  for (const ds of plan.datasets || []) {
+    if (!KEY_PATTERN.test(ds.key || '') || datasets[ds.key]) fail(`数据集 key 无效或重复：${ds.key}`);
+    if (!Array.isArray(ds.columns) || ds.columns.length === 0) fail(`数据集 ${ds.key} 没有列`);
+    if (typeof ds.file !== 'string' || ds.file === '') fail(`数据集 ${ds.key} 缺少 file`);
+    datasets[ds.key] = ds;
+  }
+  const files = {};
+  for (const f of plan.files || []) {
+    if (!KEY_PATTERN.test(f.key || '') || files[f.key]) fail(`文件 key 无效或重复：${f.key}`);
+    if (typeof f.file !== 'string' || f.file === '') fail(`文件 ${f.key} 缺少 file`);
+    files[f.key] = f;
+  }
+  const checkStep = (step) => {
+    if (!KEY_PATTERN.test(step.key || '')) fail(`step.key 只能用 ASCII 字母、数字、下划线：${step.key}`);
+    if (seen[step.key]) fail(`key 重复：${step.key}`);
+    seen[step.key] = true;
+    if (typeof step.method !== 'string') fail(`step ${step.key} 缺少 method`);
+    if (typeof step.path !== 'string' || step.path[0] !== '/') fail(`step ${step.key} 的 path 必须以 / 开头`);
+    const bodyType = step.bodyType || 'raw';
+    if (BODY_TYPES.indexOf(bodyType) === -1) fail(`step ${step.key} 的 bodyType 无效：${bodyType}`);
+    if (bodyType !== 'raw') {
+      if (!Array.isArray(step.form)) fail(`step ${step.key} 的 form 必须是数组`);
+      for (const item of step.form) {
+        if (typeof item.name !== 'string') fail(`step ${step.key} 的 form 项缺少 name`);
+        if (item.type === 'file') {
+          if (bodyType !== 'multipart') fail(`step ${step.key} 的 x-www-form-urlencoded 请求体不能带文件`);
+          if (!files[item.fileKey]) fail(`step ${step.key} 引用的文件 ${item.fileKey} 不在 plan.files 里`);
+        }
+      }
+    }
+  };
   for (const flow of plan.flows) {
     if (!KEY_PATTERN.test(flow.key || '')) fail(`flow.key 只能用 ASCII 字母、数字、下划线：${flow.key}`);
     if (seen[flow.key]) fail(`key 重复：${flow.key}`);
     seen[flow.key] = true;
     if (!isPos(flow.weight)) fail(`flow ${flow.key} 的 weight 必须是正数`);
     if (!Array.isArray(flow.steps) || flow.steps.length === 0) fail(`flow ${flow.key} 没有步骤`);
-    for (const step of flow.steps) {
-      if (!KEY_PATTERN.test(step.key || '')) fail(`step.key 只能用 ASCII 字母、数字、下划线：${step.key}`);
-      if (seen[step.key]) fail(`key 重复：${step.key}`);
-      seen[step.key] = true;
-      if (typeof step.method !== 'string') fail(`step ${step.key} 缺少 method`);
-      if (typeof step.path !== 'string' || step.path[0] !== '/') fail(`step ${step.key} 的 path 必须以 / 开头`);
+    for (const b of flow.datasets || []) {
+      if (!datasets[b.key]) fail(`flow ${flow.key} 绑定的数据集 ${b.key} 不在 plan.datasets 里`);
+      if (PICKS.indexOf(b.pick) === -1) fail(`flow ${flow.key} 的数据集取法无效：${b.pick}`);
+      if (b.onExhausted !== 'recycle' && b.onExhausted !== 'stop') fail(`flow ${flow.key} 的 onExhausted 无效：${b.onExhausted}`);
+      const stride = b.stride === undefined ? 1 : b.stride;
+      const offset = b.offset === undefined ? 0 : b.offset;
+      if (!isPosInt(stride) || !(offset >= 0 && Math.floor(offset) === offset && offset < stride)) {
+        fail(`flow ${flow.key} 的数据集 stride / offset 无效：${stride} / ${offset}`);
+      }
     }
+    for (const v of flow.variables || []) {
+      if (typeof v.name !== 'string' || typeof v.value !== 'string') fail(`flow ${flow.key} 的流程变量必须是 { name, value } 字符串`);
+    }
+    if (flow.reinitSec !== undefined && flow.reinitSec !== null && !isPos(flow.reinitSec)) {
+      fail(`flow ${flow.key} 的 reinitSec 必须是正数或 null`);
+    }
+    for (const step of flow.initSteps || []) checkStep(step);
+    for (const step of flow.steps) checkStep(step);
   }
 }
+
 
 function normalizedWeights(flows) {
   const sum = flows.reduce((acc, f) => acc + f.weight, 0);

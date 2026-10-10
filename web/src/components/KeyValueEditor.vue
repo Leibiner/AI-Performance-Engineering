@@ -14,6 +14,7 @@ withDefaults(
     /** 给出时值输入框高亮 {{变量}}，并按这些变量判断是否已定义 */
     vars?: Record<string, string>
     producers?: Record<string, string[]>
+    hints?: Record<string, string>
   }>(),
   { keyPlaceholder: '名称', valuePlaceholder: '值', addText: '添加一行' },
 )
@@ -43,6 +44,7 @@ function remove(index: number): void {
           :model-value="row.value"
           :vars="vars"
           :producers="producers"
+          :hints="hints"
           :placeholder="valuePlaceholder"
           @update:model-value="update(index, 'value', $event)"
         />

@@ -21,6 +21,7 @@ import {
 import { envTypeLabel } from '../utils/env'
 import { MODEL_LABELS, demandOf, describeConfig } from '../utils/profile'
 import { sloItems } from '../utils/slo'
+import { INIT_SEGMENT_TITLE } from '../utils/test-data'
 import { VERDICTS } from '../utils/verdict'
 import EnvTypeTag from '../components/EnvTypeTag.vue'
 import StepLatencyChart from '../components/StepLatencyChart.vue'
@@ -117,6 +118,8 @@ const sloThresholds = computed(() => (record.value?.thresholds ?? []).filter((t)
 /** k6 没有产出记录时，后端生成的 record 里 metrics 为 null */
 const hasMetrics = computed(() => !!record.value?.metrics)
 const overall = computed(() => record.value?.metrics?.overall ?? null)
+/** 旧的记录没有 scope，按 all */
+const overallScope = computed(() => overall.value?.scope ?? 'all')
 const steps = computed(() => record.value?.metrics?.steps ?? [])
 // 至少有一个步骤有样本才画图；没有样本的步骤在图上留空
 const chartable = computed(() => steps.value.some((s) => s.p50 !== null || s.p95 !== null || s.p99 !== null))
@@ -464,7 +467,18 @@ async function rerun(): Promise<void> {
           </div>
 
           <div class="panel">
-            <h2 class="panel-title">总体指标</h2>
+            <h2 class="panel-title">
+              总体指标
+              <el-tag
+                v-if="overallScope === 'main'"
+                size="small"
+                effect="plain"
+                title="不含初始化段的请求"
+                disable-transitions
+              >
+                业务请求
+              </el-tag>
+            </h2>
             <template v-if="overall">
               <div v-for="group in overallGroups" :key="group.title" class="stat-group">
                 <div class="stat-group-title">{{ group.title }}</div>
@@ -487,6 +501,17 @@ async function rerun(): Promise<void> {
               <el-table-column v-if="multiFlow" prop="flowName" label="业务流程" min-width="140" />
               <el-table-column label="步骤" min-width="180">
                 <template #default="{ row }">
+                  <el-tag
+                    v-if="row.phase === 'init'"
+                    type="warning"
+                    size="small"
+                    effect="plain"
+                    class="phase-tag"
+                    :title="INIT_SEGMENT_TITLE"
+                    disable-transitions
+                  >
+                    初始化
+                  </el-tag>
                   {{ row.stepName }} <span class="muted mono">{{ row.stepKey }}</span>
                   <el-tag v-if="row.count === 0" type="info" size="small" effect="plain" class="no-sample">没有发出请求</el-tag>
                 </template>
@@ -826,6 +851,9 @@ async function rerun(): Promise<void> {
 }
 .no-sample {
   margin-left: 6px;
+}
+.phase-tag {
+  margin-right: 6px;
 }
 .cell-warn {
   color: #d03b3b;

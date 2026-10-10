@@ -13,7 +13,7 @@
 | 能力 | 状态 | 说明 |
 |---|---|---|
 | 研究结论（k6、性能工程、Observability、AI + 性能测试） | ✅ 已完成 | `research/` |
-| 架构、边界、决策、路线图 | ✅ 已完成 | 本文、ADR-001–005、`plans/` |
+| 架构、边界、决策、路线图 | ✅ 已完成 | 本文、ADR-001–006、`plans/` |
 | 在页面上维护定义：被测环境（含类型 dev / test / staging / prod）、接口、业务流程、负载配置、测试（含验收标准） | ✅ 已实现（MVP） | 增删改查，存 SQLite（§8.2） |
 | 执行机（运行 k6 的机器）：查看主机、系统、资源、k6 / Python / uv 版本、项目目录、当前状态 | ✅ 已实现（MVP） | 只有运行后端的这一台；只能改名称和备注（§3.5） |
 | 从页面发起、停止运行 | ✅ 已实现（MVP） | 同一时间只允许 1 个运行（§3.5） |
@@ -21,7 +21,11 @@
 | 环境变量与继承的请求头（仿 Postman / Apifox）：被测环境有变量初始值，运行和调试都以它开始；调试按环境保存当前值，提取到的变量自动写回；接口页请求头里显示继承自环境的请求头 | ✅ 已实现（2026-10-09） | 运行不回写初始值；当前值只在浏览器里（§8.2） |
 | 接口文件夹：可嵌套（项目 → 模块），接口页左栏是文件夹树，业务流程选接口时按文件夹分组 | ✅ 已实现（2026-10-09） | 只用于分组，不进 plan，不影响运行；非空文件夹不能删（§8.2） |
 | 预检：定义完整、地址合法、负载形态合法、不超过被测环境的安全上限、生产环境二次确认、k6 可用 | ✅ 已实现（MVP） | 目标健康检查、k6 版本核对未实现 |
+| 预检：变量都有来源（按执行顺序静态检查每个 `{{变量}}`）、数据集够用、上传文件不超量 | ✅ 已实现（2026-10-10） | 正式运行和流程试跑都检查；调试单个接口不检查（§4.3） |
 | 数据驱动的业务流程执行（HTTP；多步骤、变量提取、检查、等待时间） | ✅ 已实现（MVP） | 通用脚本 `perf/runner.js` 解释执行；没有分支和循环（§1.2） |
+| 测试数据与变量分层：数据集（CSV，按顺序 / 随机 / 每个 VU 固定一行，用完时循环或判 `invalid`）、流程变量、动态变量（时间戳、UUID、随机数、VU 编号等）、初始化段（每个 VU 一次，输出跨迭代保留，可定时重新初始化；不计入业务 SLO） | ✅ 已实现（2026-10-10） | ADR-006；数据集绑定在业务流程上；没有"按被测环境切换数据集"（§4.3） |
+| 请求体：raw、x-www-form-urlencoded、form-data（multipart，可带上传的文件）；提取支持 GJSON 路径、正则、响应头、Cookie | ✅ 已实现（2026-10-10） | multipart 由引擎按顺序手工拼装；文件内存约为"大小 ×（VU 数 + 2）"，预检设上限（§4.3） |
+| 调试单个接口时先跑上游接口（同一次迭代、同一个 Cookie 罐）、选一行数据集调试 | ✅ 已实现（2026-10-10） | 只是调试时的依赖解析，正式运行不自动插入步骤（§3.5 调试） |
 | 同一个测试用不同负载配置运行；显式 open / closed；4 种形态 | ✅ 已实现（MVP） | 对百度只跑过冒烟级别 |
 | 多个业务流程按权重混合（Flow Mix） | ✅ 已实现（MVP） | 每个流程编译成一个 k6 scenario |
 | SLO → 阈值自动生成，并自动附加有效性阈值 | ✅ 已实现（MVP） | SLO 只到测试级别（§1.2） |
@@ -33,7 +37,7 @@
 | 静态报告 `report.md` / `report.html` | ❌ 不做 | 由运行详情页和 `dashboard.html` 替代（§12） |
 | 按流程 / 步骤设置 SLO；业务指标（业务成功率） | ❌ 未实现 | Phase 1 剩余 |
 | 负载的"形状与强度分离" | ❌ 未实现 | 负载配置里直接写绝对数值（§1.2） |
-| 测试数据：数据集、账户池、唯一键、每 VU token 缓存 | ❌ 未实现 | Phase 1 剩余（§4.3） |
+| 测试数据的剩余部分：可消耗数据的独占取用、seed / cleanup、按被测环境切换数据集、遇到 401 自动重新登录 | ❌ 未实现 | §4.3；ADR-006 复议条件 |
 | 执行机采样：运行期间每秒采样本机 CPU 和内存，写进 Run Record | ✅ 已实现（MVP） | 只展示，**不参与判定**（§3.6）；是否据此判 `invalid` 未决 |
 | 目标健康检查、失控自动中止 | ❌ 未实现 | §3.5、§3.6 |
 | 登录与权限、操作审计、多个运行同时进行 | ❌ 未实现 | ADR-005 的复议条件 |
@@ -62,7 +66,7 @@ Phase 0 的设计是"手写 JS 的 Flow 模块 + 命令行入口 + 只读控制�
 | 后端 | Node.js，只读 API | Python 3.12 + FastAPI：增删改查、预检、启动和停止 k6、最终判定、存档 | 两套工具链：Python（uv）和 Node（只用于构建前端） |
 | 存储 | `results/` 下的 JSON 文件；基线文件入 git | SQLite 单文件 `data/app.db`（定义 + 运行）+ `results/<runId>/`（产物） | 都不入 git，备份靠复制文件 |
 | 负载配置 | 只描述形状（相对比例），强度由测试给出 | **直接写绝对数值**（并发、到达率、时长） | "同一形状的不同倍数"要建多条负载配置 |
-| SLO | 按流程 / 步骤设置 p95 / p99、错误率、业务成功率 | **测试级别**：全部请求的 p95 / p99、错误率、检查通过率 | 分步骤指标能看到，但不能对单个步骤设验收标准 |
+| SLO | 按流程 / 步骤设置 p95 / p99、错误率、业务成功率 | **测试级别**：全部请求（有初始化段时只算业务请求）的 p95 / p99、错误率、检查通过率 | 分步骤指标能看到，但不能对单个步骤设验收标准 |
 | 报告 | 每次运行生成 `report.md` + 静态 `report.html` | **不生成**；运行详情页 + k6 导出的 `dashboard.html` | 看结果需要服务在线（产物文件仍可单独打开） |
 | 基线对比 | Phase 2 | 没有；结果只有本次的数值 | 不能回答"比上次差多少" |
 | 目标系统 | QuickPizza（本地 Docker） | `https://www.baidu.com`，仅冒烟（本机没有 Docker 和 sudo） | 压力、尖峰等负载无法真实运行 |
@@ -394,18 +398,21 @@ stateDiagram-v2
 
 ```text
 data/app.db                      SQLite 单文件（WAL 模式）：不入 git
-├── environments / apis / flows / profiles / tests    5 类定义
+├── environments / folders / apis / flows / profiles / tests    定义
+├── datasets / files             测试数据：数据集（解析后的行）、请求体里引用的文件（内容存库）
 └── runs                         每次运行：状态、判定、摘要、snapshot（plan）、record（Run Record）
 
 results/<runId>/                 每次运行的产物：不入 git
-├── plan.json                    发起时展开的自包含配置（= 库里的 snapshot）
+├── plan.json                    发起时展开的自包含配置（= 库里的 snapshot；数据集只带元数据和 sha256）
 ├── run-record.json              Run Record（k6 写出，后端补全后回写）
 ├── k6-summary.json              k6 原始 summary（排查用）
 ├── dashboard.html               k6 导出的图表（可选）
-└── k6.log
+├── k6.log
+├── datasets/<key>.json          用到数据集时才有：本次运行用的数据（k6 的输入，不经产物接口提供）
+└── files/<key>.bin              用到文件时才有：本次运行上传的文件（同上）
 ```
 
-删除运行时，库里的记录和产物目录一起删除；已存档的运行不能删除。测试、负载配置、环境有运行记录时仍然可以删除，因为运行里存了快照；接口被流程引用、流程被测试引用时不能删除。
+删除运行时，库里的记录和产物目录一起删除；已存档的运行不能删除。测试、负载配置、环境有运行记录时仍然可以删除，因为运行里存了快照；接口被流程引用、流程被测试引用、数据集被流程绑定、文件被接口引用时不能删除。
 
 **基线、历史、实验记录的存储形态待重新设计**：原设计是 git 管理的文件（`baselines/`、`history/`、`experiments/`）。现在运行已经在 SQLite 里，历史查询可以直接读 `runs` 表；基线放数据库还是放 git（保留"变更需要审核"这一点），到 Phase 2 再定。
 
@@ -575,19 +582,36 @@ k6 的 `Scenario` = 执行函数 × executor 配置，同时包含"做什么"和
 
 ### 4.3 Data
 
-**现状**：只有迭代内的变量传递。接口的 `extracts` 从响应中提取变量（`json` 点号路径、`regex` 第 1 个捕获组、`header` 响应头），后续步骤在 `path`、请求头的值、`body` 中用 `{{变量名}}` 引用。变量的作用域是一次迭代；变量不存在时保留原样，方便从日志里看出问题。没有数据集、账户池、唯一键和跨迭代的缓存。
+2026-10-10 按 ADR-006 实现了测试数据和变量分层。字段级的约定在 `plans/mvp-contract.md` §3.1「变量」、§3.6、§3.7、§4。
 
-**规划，未实现**（引入数据集时遵守）：
+**变量分层**（按求值顺序，后写的覆盖先写的）：
 
-| 类别 | 规则 |
-|---|---|
-| 只读数据集 | `SharedArray`（init 中加载），按 `scenario.iterationInTest % len` 选取 |
-| 账户池 | 按 `vu.idInTest % len` 绑定到 VU |
-| 唯一键 / 幂等键 | `${runId}-${vu.idInTest}-${scenario.iterationInTest}` |
-| Session / Token | 每 VU 缓存，过期前刷新；登录打单独的 `step` tag，与业务 SLO 分开 |
-| 可消耗数据、租户分层、seed / cleanup | 独占取用；权重分配；按 runId 前缀清理 |
+| 顺序 | 层 | 生命周期 |
+|---|---|---|
+| 1 | 被测环境的变量初始值（调试单个接口时，页面上的当前值覆盖它） | 每次迭代重新开始 |
+| 2 | 数据集的行（流程绑定的数据集按取法取一行，列名即变量名） | 每次迭代 |
+| 3 | 流程变量（每次迭代求值一次，用来在多个步骤间共用一个生成的值） | 每次迭代 |
+| 4 | 初始化段的输出（每个 VU 第一次迭代执行一次，可按间隔重新执行） | 这个 VU 的后续迭代 |
+| 5 | 步骤提取（GJSON 路径、正则、响应头、Cookie） | 本次迭代 |
 
-**禁止**：用 `__VU` / `idInInstance` 选数据（分布式不唯一）；在 VU 代码中 `open()`（`runner.js` 只在 init 阶段读 plan）；ID 类数据进 tag。
+`{{$名称}}` 是动态变量（时间戳、UUID、随机数、随机串、VU 编号、迭代序号、运行 id），每次替换时现算。
+
+**数据规则**：
+
+| 类别 | 实现 | 状态 |
+|---|---|---|
+| 只读数据集 | 后端把 CSV 解析成规范的行（UTF-8 / GB18030 自动识别），运行时写进运行目录；引擎用 `SharedArray` 加载，所有 VU 共享一份 | ✅ 已实现 |
+| 按顺序取（全局游标） | `scenario.iterationInTest × stride + offset`；多个流程共用一个数据集时由后端分配步长，互不重复 | ✅ 已实现 |
+| 账户池 | 取法"每个 VU 固定一行"：`vu.idInTest − 1` | ✅ 已实现 |
+| 随机取 | `Math.random()` | ✅ 已实现 |
+| 用完时 | 循环使用；或"停止测试"：计数指标 `data_exhausted` + validity 阈值（`abortOnFail`），判 `invalid` | ✅ 已实现 |
+| 唯一键 / 幂等键 | 动态变量组合，如 `{{$runId}}-{{$vu}}-{{$iteration}}`，或 `{{$uuid}}` | ✅ 已实现 |
+| Session / Token | 初始化段：每个 VU 登录一次，输出跨迭代保留；`reinitSec` 到期重新登录；初始化段的请求带 `phase:init` tag，不计入总体指标和业务 SLO | ✅ 已实现（没有"遇到 401 自动重新登录"） |
+| 可消耗数据的独占取用、租户分层、seed / cleanup | 独占取用；权重分配；按 runId 前缀清理 | 规划，未实现 |
+
+**变量来源检查**：正式运行和流程试跑的预检按执行顺序检查每个引用能否在上面五层里找到来源（被测环境的变量按这次运行的环境算），没有来源、先用后定义、不认识的动态变量都会被拒绝。流程试跑不再使用浏览器里的当前值，与正式运行语义一致。
+
+**禁止**：用 `__VU` / `idInInstance` 选数据（分布式不唯一）；在 VU 代码中 `open()`（数据集和文件都在 init 阶段加载）；把数据集的行内嵌进 plan（每个 VU 各解析一次 plan，内存随 VU 数线性增长）；ID 类数据进 tag。
 
 ### 4.4 Metrics 与 tag
 
@@ -702,7 +726,7 @@ flowchart TB
 | **执行引擎核心** | `perf/core/` | Composer、阈值生成与分类、流程解释器、Run Record 生成和 `k6Verdict` | 只依赖 k6 内置模块 | 认识任何具体的被测系统；`k6/x/*`、`k6/experimental/*`；npm |
 | **k6 入口** | `perf/runner.js` | 读 plan，导出 `options`、`runFlow`、`handleSummary` | `perf/core/` | 业务逻辑、写死的地址或负载 |
 | **后端** | `server/` | 增删改查和校验、预检、组装 plan、启动和停止 k6、最终判定、补全 Run Record、存档、托管前端 | Python 标准库、FastAPI | import `perf/` 的代码（只通过 `plan.json`、命令行参数、`results/` 文件交互）；`--workers` 多进程 |
-| **前端** | `web/` | 9 个页面：维护定义、发起和停止运行、查看结果 | 后端的 REST 接口 | 直接读文件或数据库；计算判定；连 k6 实时仪表盘 |
+| **前端** | `web/` | 10 个页面：维护定义和测试数据、发起和停止运行、查看结果 | 后端的 REST 接口 | 直接读文件或数据库；计算判定；连 k6 实时仪表盘 |
 | **脚本** | `scripts/` | 环境准备、启动、停止 | uv、`.tools/` | — |
 
 三部分之间**只通过契约关联**（`plans/mvp-contract.md`）：前端 ⇄ 后端是 REST 接口；后端 → k6 是 `plan.json`；k6 → 后端是 `run-record.json` 和退出码。改接口先改契约，再改代码。
@@ -721,20 +745,24 @@ AI-Performance-Engineering/
 ├── docs/                         文档（§13）
 │
 ├── perf/                         k6 加载的代码（无 npm、无构建）
-│   ├── runner.js                 通用 k6 脚本：读 plan.json 解释执行
+│   ├── runner.js                 通用 k6 脚本：读 plan.json 解释执行；init 阶段用 SharedArray 加载数据集、读入上传的文件
 │   ├── core/
 │   │   ├── compose.js            Composer：plan → scenarios；校验 plan
 │   │   ├── thresholds.js         SLO → 阈值；附加有效性阈值和占位阈值；阈值分类
-│   │   ├── interp.js             流程解释器：变量替换、请求、check、提取、等待
+│   │   ├── interp.js             流程解释器：取数据集的行、流程变量、初始化段（每 VU 一次）、变量与动态变量替换、请求体（raw / 表单 / multipart）、check、提取、等待
 │   │   └── summary.js            handleSummary：run-record.json、k6-summary.json、文字摘要
 │   └── examples/                 3 份示例 plan（闭环冒烟、恒定到达率、两个流程），可直接 k6 inspect
 │
 ├── server/                       后端（Python 3.12 + FastAPI + sqlite3）
 │   ├── main.py                   应用入口；托管 web/dist；/api 下找不到时返回 JSON 404
 │   ├── config.py                 环境变量：DATA_DIR、RESULTS_DIR、K6_BIN、WEB_DIST、仪表盘端口
-│   ├── db.py                     SQLite 连接、建表（7 张表）、按 PRAGMA user_version 的版本迁移（迁移前自动备份）
-│   ├── resources.py              5 类定义的统一增删改查、引用保护
-│   ├── validators.py             字段校验、负载配置的四种形态、被测环境类型和安全上限
+│   ├── db.py                     SQLite 连接、建表（10 张表）、按 PRAGMA user_version 的版本迁移（迁移前自动备份）
+│   ├── resources.py              定义类资源的统一增删改查、引用保护
+│   ├── validators.py             字段校验、负载配置的四种形态、被测环境类型和安全上限、变量名规则
+│   ├── datasets.py               数据集：/api/datasets、CSV 解析（编码与分隔符识别）、导出
+│   ├── files.py                  文件：/api/files（JSON + base64 上传、下载）
+│   ├── plan.py                   运行和调试共用的 plan 组装；把用到的数据集和文件写进运行目录
+│   ├── variables.py              变量来源检查（预检第 8 条）、动态变量的参数规则
 │   ├── executors.py              执行机：/api/executors、本机信息实时采集、运行期间的 CPU / 内存采样
 │   ├── runs.py                   预检、组装 plan、启动 / 停止 k6、最终判定、Run Record、产物；调试与运行互斥的槽位
 │   ├── debug.py                  调试：组 1 并发 1 迭代的 plan、以调试模式跑 k6、读回调试记录（契约 §3.5）
@@ -746,13 +774,15 @@ AI-Performance-Engineering/
 ├── web/                          前端（Vue 3 + TypeScript + Vite + Element Plus + ECharts）
 │   ├── package.json / package-lock.json / vite.config.ts / tsconfig.json / index.html
 │   └── src/
-│       ├── views/                9 个页面：Overview / Executors / Environments / Apis / Flows / Profiles / Tests / Runs / RunDetail
-│       ├── components/           RunDialog、VerdictTag、StatusTag、EnvTypeTag、ThresholdTable、StepLatencyChart、KeyValueEditor、PageHeader
-│       │   ├── apis/             接口工作台：ApiList（左栏）、ApiEditor（请求栏 + 标签页 + 响应面板）、CurlImportDialog
-│       │   └── debug/            调试：DebugContextBar（环境 / 变量 / 生产确认）、DebugStepPanel（一步的响应）、DebugErrorView、FlowDebugDialog（流程试跑）
+│       ├── views/                10 个页面：Overview / Executors / Environments / Apis / Flows / Data / Profiles / Tests / Runs / RunDetail
+│       ├── components/           RunDialog、VerdictTag、StatusTag、EnvTypeTag、ThresholdTable、StepLatencyChart、KeyValueEditor、PageHeader、VarInput
+│       │   ├── apis/             接口工作台：ApiList（左栏）、ApiEditor（请求栏 + 标签页 + 响应面板）、BodyEditor（四种请求体）、UpstreamPicker（先运行上游）、DataRowPicker（调试用数据行）、CurlImportDialog
+│       │   ├── flows/            FlowStepList（初始化段 / 每次迭代两段步骤，带变量来源标注）
+│       │   ├── data/             测试数据：DatasetsPanel、DatasetDialog、CsvPreview、FilesPanel
+│       │   └── debug/            调试：DebugEnvBar、EnvPicker（调试环境）、VariablesTable（变量表 + 动态变量清单）、DebugStepPanel（一步的响应）、DebugErrorView、FlowDebugDialog（流程试跑，可选数据行）
 │       ├── api/                  唯一的数据访问层：http.ts、types.ts（与契约对应）、index.ts
-│       ├── composables/          useResourceList、useStartRun（含生产环境二次确认）
-│       ├── utils/                格式化、判定的显示、负载配置和 SLO 的描述
+│       ├── composables/          useResourceList、useStartRun（含生产环境二次确认）、useDebug / useDebugContext（调试与当前值）、useApiIndex（变量的产出和引用索引）、useDatasetList、useFileList、useDebugRows
+│       ├── utils/                格式化、判定的显示、负载配置和 SLO 的描述、变量写法与动态变量（vars）、变量来源分析（var-sources，与预检规则一致）、cURL 解析
 │       └── router.ts / App.vue / main.ts / styles.css
 │
 ├── scripts/
@@ -940,8 +970,9 @@ k6 inspect perf/runner.js -e PLAN_FILE=<plan.json 的绝对路径>
 | 概览 | `/` | 各类定义、执行机和运行的数量、判定分布、最近 10 次运行 | `GET /api/overview` |
 | 执行机 | `/executors` | 查看运行 k6 的机器：主机名、IP、系统、CPU、内存、负载、磁盘、k6 / Python / uv 版本、项目目录、当前状态；只能改名称和备注。运行中时每 3 秒刷新 | `/api/executors` |
 | 被测环境 | `/environments` | 增删改查：名称、类型（开发 / 测试 / 预发 / 生产）、基础地址、公共请求头、环境变量（统一的变量表（每行一个变量：初始值、当前值、来源是环境定义还是由哪个接口提取、被几个接口引用；当前值空着就用初始值，改过的高亮，可单个或全部恢复初始值），初始值在这里编辑）、安全上限（最大并发、最大到达率、最长时长；生产必填，其他类型留空表示不限制） | `/api/environments` |
-| 接口 | `/apis` | Postman 式工作台：左栏是**文件夹树**（文件夹可嵌套，如项目 → 模块；顶部"新建"下拉（新建接口、从 cURL 导入接口、新建文件夹）一律建在根目录；要建在某个文件夹里，用该文件夹的 … 菜单（新建接口、新建子文件夹、重命名、删除，非空不可删）；接口也可在编辑器里改所属文件夹；搜索会过滤整棵树），右栏编辑器：方法、当前调试环境（就在路径前面，显示类型标签和地址，和路径拼成一条完整地址；与页头右侧是同一个选择）、路径、Query 参数（与路径里的 `?` 双向同步）、请求头（当前调试环境的公共请求头和接口自己的请求头在同一张表里，环境行可直接改值，改了就成为本接口的同名请求头、只影响本接口，可一键恢复继承；换环境继承的行跟着变）、请求体（JSON 格式化）、期望、变量提取、备注、环境变量（当前调试环境的统一的变量表（每行一个变量：初始值、当前值、来源是环境定义还是由哪个接口提取、被几个接口引用；当前值空着就用初始值，改过的高亮，可单个或全部恢复初始值）；每次发送 / 试跑后提取到的变量写进当前值）；**发送**一次（发送的是正在编辑的内容，不必先保存；生产环境首次发送弹一次确认），响应面板显示状态码、耗时、大小、响应体（JSON 美化）、响应头、检查、变量、实际请求、耗时分解；路径、参数值、请求头值、请求体、期望文本里的括号着色（只给括号上色，内容不加样式）：`{{ }}` 按变量状态着色，有当前值蓝、由其他接口提取但还没值紫、无人定义橙，普通 `{ }` 用中性色；悬停显示变量值或来源；复制接口、复制为 cURL；编辑器里可改所属文件夹；未保存有提示 | `/api/apis`、`/api/folders`、`POST /api/debug` |
-| 业务流程 | `/flows` | 增删改查：按顺序排列接口步骤（选接口时按文件夹分组），设置每步的等待时间；**试跑**：选被测环境后跑一次迭代，逐步显示请求、响应、检查、变量，失败后未执行的步骤标为未执行 | `/api/flows`、`POST /api/debug` |
+| 接口 | `/apis` | Postman 式工作台：左栏是**文件夹树**（文件夹可嵌套，如项目 → 模块；顶部"新建"下拉（新建接口、从 cURL 导入接口、新建文件夹）一律建在根目录；要建在某个文件夹里，用该文件夹的 … 菜单（新建接口、新建子文件夹、重命名、删除，非空不可删）；接口也可在编辑器里改所属文件夹；搜索会过滤整棵树），右栏编辑器：方法、当前调试环境（就在路径前面，显示类型标签和地址，和路径拼成一条完整地址；与页头右侧是同一个选择）、路径、Query 参数（与路径里的 `?` 双向同步）、请求头（当前调试环境的公共请求头和接口自己的请求头在同一张表里，环境行可直接改值，改了就成为本接口的同名请求头、只影响本接口，可一键恢复继承；换环境继承的行跟着变）、请求体（JSON 格式化）、期望、变量提取、备注、环境变量（当前调试环境的统一的变量表（每行一个变量：初始值、当前值、来源是环境定义还是由哪个接口提取、被几个接口引用；当前值空着就用初始值，改过的高亮，可单个或全部恢复初始值）；每次发送 / 试跑后提取到的变量写进当前值）；**发送**一次（发送的是正在编辑的内容，不必先保存；生产环境首次发送弹一次确认），响应面板显示状态码、耗时、大小、响应体（JSON 美化）、响应头、检查、变量、实际请求、耗时分解；路径、参数值、请求头值、请求体、期望文本里的括号着色（只给括号上色，内容不加样式）：`{{ }}` 按变量状态着色，有当前值蓝、由其他接口提取但还没值紫、无人定义橙，普通 `{ }` 用中性色；悬停显示变量值或来源；复制接口、复制为 cURL；编辑器里可改所属文件夹；未保存有提示。**请求体**四种：none / form-data（文本或文件行，文件可就地上传）/ x-www-form-urlencoded / raw；**提取**来源加 Cookie，JSON 路径支持 GJSON 和 `$.a[0]` 写法，正则写错标红；**先运行上游**：发送按钮右侧的下拉列出能提取本接口所需变量的接口，选中后上游和目标在同一次迭代里执行，响应区上游各一行、目标完整显示；**数据**：选一个数据集和行号参与这次发送，它的列在高亮里算有值；`{{$动态变量}}` 按是否认识、参数是否合法着色 | `/api/apis`、`/api/folders`、`/api/files`、`/api/datasets`、`POST /api/debug` |
+| 业务流程 | `/flows` | 增删改查：按顺序排列接口步骤（选接口时按文件夹分组），设置每步的等待时间；**数据集绑定**（取法：按顺序 / 随机 / 每个 VU 固定一行；数据用完时：循环使用 / 停止测试）、**流程变量**、步骤分**初始化（每个 VU 一次）**和**每次迭代**两段（可设重新初始化间隔）；每一步标出用到和产出的变量，按预检同样的规则（以对话框底部选的调试环境为准）把没有来源的引用标红并汇总；**试跑**：选被测环境和每个数据集的行号后跑一次迭代（不用浏览器里的当前值，和正式运行一致），逐步显示请求、响应、检查、变量，初始化步骤带标记，失败后未执行的步骤标为未执行 | `/api/flows`、`/api/datasets`、`POST /api/debug` |
+| 测试数据 | `/data` | **数据集**：列表（列、行数、识别出的编码和分隔符、绑定的流程）；新建 / 编辑：上传 CSV（UTF-8 / GB18030 自动识别）或直接编辑 CSV 文本（不超过 2000 行时），实时预览前 100 行和解析错误，下载为 Excel 能直接打开的 CSV；被绑定时不能删除。**文件**：上传（≤ 10 MiB）、替换内容、改名和类型、下载；被接口引用时不能删除 | `/api/datasets`、`/api/files` |
 | 负载配置 | `/profiles` | 增删改查：类型标签、open / closed、四种形态的参数 | `/api/profiles` |
 | 测试 | `/tests` | 增删改查：选择流程和权重、设置验收标准；显示最近一次运行；**发起运行**（选负载配置和被测环境，显示执行机，对照安全上限；被测环境是生产时要二次确认） | `/api/tests`、`POST /api/runs` |
 | 运行列表 | `/runs` | 按测试 / 判定 / 状态 / 存档筛选，分页；列：开始时间、测试 / 负载配置（两行）、被测环境（带类型标签）、判定（运行中显示状态）、p95、错误率、请求数、备注；存档、删除 | `GET /api/runs`、`PATCH`、`DELETE` |
@@ -961,8 +992,8 @@ k6 inspect perf/runner.js -e PLAN_FILE=<plan.json 的绝对路径>
 | 2 | 有效性检查 | validity 阈值逐条的结果 | `record.thresholds` |
 | 2a | 执行机 | 主机、CPU 核数、运行期间的 CPU 平均 / 峰值占用、内存峰值占用、采样次数；注明"仅供参考，不参与判定"。旧运行没有这项数据时不显示 | `record.executor` |
 | 3 | 验收标准 | slo 阈值逐条的结果；判定为 `invalid` 时整体置灰 | `record.thresholds` |
-| 4 | 总体指标 | 请求数、RPS、迭代数、丢弃的迭代数、响应时间各分位、错误率、检查通过率、流量 | `record.metrics.overall` |
-| 5 | 分步骤指标 | 每个步骤的请求数、平均 / p50 / p95 / p99 / 最大、错误率；没发出请求的步骤单独标出 | `record.metrics.steps` |
+| 4 | 总体指标 | 请求数、RPS、迭代数、丢弃的迭代数、响应时间各分位、错误率、检查通过率、流量；流程带初始化段时标"业务请求"（请求数、响应时间、错误率不含初始化段） | `record.metrics.overall` |
+| 5 | 分步骤指标 | 每个步骤的请求数、平均 / p50 / p95 / p99 / 最大、错误率；初始化段的步骤带"初始化"标记；没发出请求的步骤单独标出 | `record.metrics.steps` |
 | 6 | 分步骤响应时间 | 每个步骤 p50 / p95 / p99 的柱状图（ECharts） | 同上 |
 | 7 | k6 图表 | iframe 显示 `dashboard.html`；文件不存在时不显示这个区块 | 产物 |
 | 8 | 产物 | `plan.json`、`run-record.json`、`k6-summary.json`、`dashboard.html`、`k6.log` 的查看和下载链接 | `artifacts` |
@@ -977,10 +1008,11 @@ k6 没有产出指标时（判定为 `error` 等），第 2–6 块换成一段�
 ```mermaid
 flowchart LR
     subgraph WEB["web/（单页应用，history 路由）"]
-        PAGES["views：9 个页面"] --> APIC["src/api 数据访问层"]
+        PAGES["views：10 个页面"] --> APIC["src/api 数据访问层"]
     end
     subgraph SRV["server/（FastAPI，单进程）"]
         RESR["resources + validators<br/>定义的增删改查"]
+        DATA["datasets / files<br/>测试数据"]
         RUNS["runs<br/>预检 / 编排 / 判定 / 产物"]
         EXE["executors<br/>执行机信息 / 运行期间采样"]
         SYS["system<br/>概览 / 系统信息"]
@@ -989,10 +1021,11 @@ flowchart LR
     DB[("data/app.db")]
     FS[("results/runId/")]
     K6["k6 子进程"]
-    APIC -->|"REST /api"| RESR & RUNS & EXE & SYS
+    APIC -->|"REST /api"| RESR & DATA & RUNS & EXE & SYS
     RUNS --> EXE
     EXE --> DB
     RESR --> DB
+    DATA --> DB
     RUNS --> DB
     SYS --> DB
     RUNS --> FS
@@ -1003,9 +1036,11 @@ flowchart LR
 | 接口 | 说明 |
 |---|---|
 | `GET / POST /api/<res>`，`GET / PUT / DELETE /api/<res>/:id` | 定义类资源统一的增删改查，`<res>` = `environments`、`folders`、`apis`、`flows`、`profiles`、`tests`。`PUT` 整体替换；被引用的接口和流程、非空的文件夹删除时返回 409 |
+| `/api/datasets`（含 `/:id/csv` 导出、`/preview` 只解析不保存） | 数据集：上传 CSV（`contentBase64`，自动识别 UTF-8 / GB18030 和分隔符）或提交 CSV 文本，后端解析成规范的行；被流程绑定时删除返回 409（契约 §3.6） |
+| `/api/files`（含 `/:id/content` 下载） | form-data 请求体引用的文件（JSON + base64 上传，≤ 10 MiB）；被接口引用时删除返回 409（契约 §3.7） |
 | `GET /api/executors`，`GET / PUT /api/executors/:id` | 执行机。目前恒为 1 项（本机），没有新增和删除；`PUT` 只能改名称和备注 |
 | `POST /api/runs` | 发起运行：`{testId, profileId, envId, executorId?, confirmProd?, note}`。`executorId` 省略时用本机执行机；被测环境是生产时必须带 `confirmProd: true`。成功返回 201；预检不通过 422；已有运行 409 |
-| `POST /api/debug` | 调试：`{envId, confirmProd?, vars?, api? \| flowId?}`，用真实 k6 跑一次迭代，同步返回每一步的请求、响应、检查、变量（契约 §3.5）。有运行在进行或上一次调试未结束 409；k6 没产出记录 500 `DEBUG_FAILED` |
+| `POST /api/debug` | 调试：`{envId, confirmProd?, api + vars? + beforeApiIds? \| flowId, rows?}`，用真实 k6 跑一次迭代，同步返回每一步的请求、响应、检查、变量（契约 §3.5）。`beforeApiIds` 先跑上游接口，`rows` 指定数据集的行；试跑流程不接受 `vars`，并做变量来源检查。有运行在进行或上一次调试未结束 409；k6 没产出记录 500 `DEBUG_FAILED` |
 | `GET /api/runs?testId=&verdict=&status=&archived=&page=&pageSize=` | 运行列表，按开始时间倒序，返回 `{items, total}` |
 | `GET /api/runs/:runId` | 运行详情：含 `snapshot`、`record`、`artifacts`、`progress` |
 | `POST /api/runs/:runId/stop` | 停止正在进行的运行 |
@@ -1021,7 +1056,7 @@ flowchart LR
 | 要点 | 说明 |
 |---|---|
 | 同一个端口 | 后端托管 `web/dist`，接口走相对路径 `/api`；其余路径找不到文件时回退到 `index.html`，由前端路由处理 |
-| 开发模式 | `npm run dev` 在 5180 端口启动 Vite，把 `/api` 代理到本机 8088 |
+| 开发模式 | `npm run dev` 在 5180 端口启动 Vite，把 `/api/` 开头的请求代理到本机 8088（用正则匹配，页面路由 `/apis` 不会被转发） |
 | 统一错误格式 | `{ "error": { "code", "message", "details" } }`，`message` 和 `details` 是中文，前端直接显示 |
 | 只能单进程 | 正在运行的 k6 进程句柄在内存里，不能加 `--workers` |
 | 运行中的显示 | 发起时就写入一条 `status = running` 的记录，页面据此显示正在进行的运行 |
@@ -1150,7 +1185,7 @@ flowchart LR
 |---|---|---|
 | **0 Research & Architecture** ✅ | 研究、架构、决策 | 已完成 |
 | **MVP** ✅（2026-09-30） | 管理控制台、数据驱动的执行引擎、后端编排、SQLite 存档；对百度冒烟 | 已完成。覆盖了原 Phase 1 的大部分，以及 Phase 2 的 Flow Mix 和控制台 |
-| **1 剩余** | 自有目标系统；多步骤流程（含登录）在真实目标上验证；按流程 / 步骤的 SLO；数据规则；业务指标；`invalid` 的真实端到端验证；Pain Point Log | 同一个测试以 smoke / average / stress 在自有目标上运行；VU 不足 → `invalid`；SLO 收紧 → `failed` |
+| **1 剩余** | 自有目标系统；多步骤流程（含登录）在真实目标上验证；按流程 / 步骤的 SLO；数据规则的剩余部分（数据集、账户池、唯一键、每 VU 登录一次已于 2026-10-10 按 ADR-006 实现）；业务指标；`invalid` 的真实端到端验证；Pain Point Log | 同一个测试以 smoke / average / stress 在自有目标上运行；VU 不足 → `invalid`；SLO 收紧 → `failed` |
 | **2 Real Workflow & Baseline** | 基线与对比、实验记录、Prometheus / Grafana、CI（入口先重新设计）、控制台增加对比和基线页 | 能检出人为引入的回归且不误报；至少一个完整的实验闭环 |
 | **3 Observability & Evidence** | Trace / 系统指标关联、Evidence Bundle、规则化定位基线、标注故障数据集（≥ 30 样本）；控制台增加趋势和证据视图 | 基线命中率已测得 |
 | **4 AI Evaluation** | 离线对比 AI 与规则基线 | Go / No-Go（Go 条件：Top-3 命中率 ≥ 基线 + 15pp、证据引用 100%、幻觉 ≤ 5%、诊断时间 −30%、结果稳定） |
@@ -1172,7 +1207,8 @@ flowchart LR
 | 多个运行同时进行 | k6 进程句柄在内存里，仪表盘端口固定，服务单进程 | 需要并行时重新设计运行编排 |
 | 单元测试套件、测试框架 | 用户决定：禁止过度测试，靠真实运行验证 | 用户改变决定 |
 | 静态报告 `report.md` / `report.html` | 运行详情页和 `dashboard.html` 已经覆盖 | 需要离线报告或 CI 制品时 |
-| 手写 JS 的 Flow 模块；流程的分支、循环、轮询 | 页面维护要求流程是数据 | 真实业务流程表达不了时（ADR-005 复议条件） |
+| 手写 JS 的 Flow 模块；流程的分支、循环、轮询；前置 / 后置脚本 | 页面维护要求流程是数据；脚本让变量来源无法静态检查（ADR-006） | 真实业务流程表达不了时（ADR-005 复议条件）。数据集和每 VU 登录一次已用扩展数据模型解决，不构成理由 |
+| 运行中跨 VU / 跨流程共享数据（队列、KV、Redis） | 把生产方的速度混进消费方的延迟，结果难以解释；k6 v2 里要靠扩展 | 用"数据准备 → 数据集"代替 |
 | 基线对比、趋势、CI、Prometheus / Grafana、Trace、Evidence Bundle | 还没到对应阶段 | 见 §11 |
 | 统一协议接口、插件系统 | k6 模块即协议抽象 | ≥ 3 种协议且大量重复 |
 | HTTP 以外的协议（gRPC / WebSocket / SQL / Kafka / TCP / AMQP） | 目标系统尚不需要 | 目标系统需要时 |
@@ -1182,7 +1218,7 @@ flowchart LR
 | 自建 Observability 平台、自研回归算法 | Prometheus / Grafana、Otava 已成熟 | 不自建 |
 | `perf/` 里引入 TypeScript 或构建工具链 | k6 原生运行 JS，保持无构建 | 引擎代码量大到需要类型检查时 |
 
-已经从这张表里移出（MVP 已实现）：在页面上维护定义、从页面发起和停止压测、数据库（SQLite）。
+已经从这张表里移出（MVP 已实现）：在页面上维护定义、从页面发起和停止压测、数据库（SQLite）；（2026-10-10）数据集。
 
 ---
 

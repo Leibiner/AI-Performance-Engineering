@@ -1,15 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { splitVars, varNames } from '../utils/vars'
+import { dynamicArgProblem, dynamicVar, isDynamicRef, splitVars, varNames, type VarResolution, type VarState } from '../utils/vars'
 
 // 输入框文字透明只留光标，底下一层逐字对齐地渲染文本，只给括号上色：
-// {{ }} 按变量状态着色（有值蓝、待提取紫、未定义橙），普通 { } 用中性色；括号里的内容不加样式。
+// {{ }} 按变量状态着色（有值蓝、待提取紫、未定义橙、不确定灰），普通 { } 用中性色；括号里的内容不加样式。
 const model = defineModel<string>({ default: '' })
 const props = withDefaults(
   defineProps<{
     vars?: Record<string, string>
     /** 变量名 → 提取它的接口名 */
     producers?: Record<string, string[]>
+    /** 变量名 → 来源说明：有来源、但值要到发送时才知道（如数据集的列） */
+    hints?: Record<string, string>
+    /** 给出时由它决定每个引用的状态和说明，其余三项不再使用 */
+    resolve?: (name: string) => VarResolution
     placeholder?: string
     multiline?: boolean
     rows?: number
@@ -17,25 +21,49 @@ const props = withDefaults(
     /** 去掉边框和圆角，嵌进别的容器 */
     seamless?: boolean
   }>(),
-  { vars: () => ({}), producers: () => ({}), placeholder: '', multiline: false, rows: 6, readonly: false, seamless: false },
+  {
+    vars: () => ({}),
+    producers: () => ({}),
+    hints: () => ({}),
+    resolve: undefined,
+    placeholder: '',
+    multiline: false,
+    rows: 6,
+    readonly: false,
+    seamless: false,
+  },
 )
 
 const segments = computed(() => splitVars(model.value ?? ''))
 const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k)
-function state(name: string): 'is-known' | 'is-extracted' | 'is-unknown' {
-  if (has(props.vars, name)) return 'is-known'
-  return props.producers[name]?.length ? 'is-extracted' : 'is-unknown'
+
+function resolveName(name: string): VarResolution {
+  if (props.resolve) return props.resolve(name)
+  if (isDynamicRef(name)) {
+    const d = dynamicVar(name)
+    if (!d) return { state: 'is-unknown', title: `${name}：不是内置的动态变量` }
+    const problem = dynamicArgProblem(name)
+    return problem ? { state: 'is-unknown', title: `${name}：${problem}` } : { state: 'is-known', title: `${name}：${d.meaning}` }
+  }
+  if (has(props.vars, name)) return { state: 'is-known', title: `${name} = ${props.vars[name]}` }
+  if (has(props.hints, name)) return { state: 'is-known', title: `${name}：${props.hints[name]}` }
+  const by = props.producers[name]
+  if (by?.length) return { state: 'is-extracted', title: `${name}：由「${by.join('、')}」提取，发送后才有值` }
+  return { state: 'is-unknown', title: `${name}：未定义` }
+}
+
+const resolved = computed(() => {
+  const out = new Map<string, VarResolution>()
+  for (const seg of segments.value) if (seg.name && !out.has(seg.name)) out.set(seg.name, resolveName(seg.name))
+  return out
+})
+function state(name: string): VarState {
+  return resolved.value.get(name)?.state ?? 'is-unknown'
 }
 const title = computed(() => {
   const names = varNames(model.value ?? '')
   if (!names.length) return undefined
-  return names
-    .map((n) => {
-      if (has(props.vars, n)) return `${n} = ${props.vars[n]}`
-      const by = props.producers[n]
-      return by?.length ? `${n}：由「${by.join('、')}」提取，发送后才有值` : `${n}：未定义`
-    })
-    .join('\n')
+  return names.map((n) => resolved.value.get(n)?.title ?? n).join('\n')
 })
 
 const OPEN = '{{'
@@ -183,6 +211,9 @@ function syncScroll(e: Event): void {
 }
 .var-brace.is-unknown {
   color: #d9480f;
+}
+.var-brace.is-unsure {
+  color: #8a9099;
 }
 .var-brace {
   font-weight: inherit;

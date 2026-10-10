@@ -30,35 +30,53 @@ export function stepFailedMetric(stepKey) {
   return `http_req_failed{step:${stepKey}}`;
 }
 
+/** plan 里是否有流程带初始化段（契约 §4、§5）。 */
+export function hasInitSteps(plan) {
+  return (plan.flows || []).some((f) => Array.isArray(f.initSteps) && f.initSteps.length > 0);
+}
+
 /**
- * @returns {{ thresholds: Record<string, string[]>, meta: Array<{metric: string, expr: string, kind: string, label: string}> }}
+ * 总体指标和 SLO 用的指标名。有初始化段时只算每次迭代的步骤（phase:main），
+ * 登录这类初始化请求不计入业务 SLO（契约 §5，ADR-006 决定 4）。
+ */
+export function overallMetric(plan, name) {
+  return hasInitSteps(plan) ? `${name}{phase:main}` : name;
+}
+
+/**
+ * @returns {{ thresholds: Record<string, Array<string|object>>, meta: Array<{metric: string, expr: string, kind: string, label: string}> }}
  *   thresholds 直接放进 options.thresholds；meta 与之一一对应，供 handleSummary 分类。
  */
 export function buildThresholds(plan) {
   const thresholds = {};
   const meta = [];
-  const add = (metric, expr, kind, label) => {
+  const add = (metric, expr, kind, label, abortOnFail) => {
     if (!thresholds[metric]) thresholds[metric] = [];
-    if (thresholds[metric].indexOf(expr) !== -1) return;
-    thresholds[metric].push(expr);
+    if (meta.some((m) => m.metric === metric && m.expr === expr)) return;
+    thresholds[metric].push(abortOnFail ? { threshold: expr, abortOnFail: true } : expr);
     meta.push({ metric, expr, kind, label });
   };
 
   const slo = plan.slo || {};
+  const scoped = hasInitSteps(plan);
+  const duration = overallMetric(plan, 'http_req_duration');
+  const failed = overallMetric(plan, 'http_req_failed');
+  const who = scoped ? '业务请求' : '全部请求';
 
   // ---- SLO ----
   if (isNum(slo.p95Ms)) {
-    add('http_req_duration', `p(95)<${slo.p95Ms}`, KIND_SLO, `全部请求 p95 < ${slo.p95Ms} ms`);
+    add(duration, `p(95)<${slo.p95Ms}`, KIND_SLO, `${who} p95 < ${slo.p95Ms} ms`);
   }
   if (isNum(slo.p99Ms)) {
-    add('http_req_duration', `p(99)<${slo.p99Ms}`, KIND_SLO, `全部请求 p99 < ${slo.p99Ms} ms`);
+    add(duration, `p(99)<${slo.p99Ms}`, KIND_SLO, `${who} p99 < ${slo.p99Ms} ms`);
   }
   if (isNum(slo.errorRate)) {
+    const prefix = scoped ? '业务请求错误率' : '错误率';
     if (slo.errorRate > 0) {
-      add('http_req_failed', `rate<${slo.errorRate}`, KIND_SLO, `错误率 < ${percent(slo.errorRate)}`);
+      add(failed, `rate<${slo.errorRate}`, KIND_SLO, `${prefix} < ${percent(slo.errorRate)}`);
     } else {
       // "rate<0" 永远不成立，错误率上限为 0 时改用 <=
-      add('http_req_failed', 'rate<=0', KIND_SLO, '错误率 = 0');
+      add(failed, 'rate<=0', KIND_SLO, `${prefix} = 0`);
     }
   }
 
@@ -71,9 +89,20 @@ export function buildThresholds(plan) {
     add('dropped_iterations', 'count==0', KIND_VALIDITY, '没有被丢弃的迭代（预分配 VU 足够）');
   }
 
-  // ---- 占位：按 step 拆分 ----
+  if ((plan.flows || []).some((f) => (f.datasets || []).some((b) => b.onExhausted === 'stop'))) {
+    // 数据用完时 interp.js 计数；abortOnFail 让 k6 约 2 秒内停下并以 99 退出，判 invalid。
+    // 不用 test.abort()：它的退出码 108 会被后端判成 aborted，看起来像有人点了停止
+    add('data_exhausted', 'count==0', KIND_VALIDITY, '测试数据没有用完', true);
+  }
+
+  // ---- 占位：按 step 拆分；有初始化段时还要拿到 phase:main 的子指标 ----
+  if (scoped) {
+    add(duration, 'max>=0', KIND_PLACEHOLDER, '业务请求响应时间（占位）');
+    add(failed, 'rate>=0', KIND_PLACEHOLDER, '业务请求错误率（占位）');
+    add(overallMetric(plan, 'http_reqs'), 'count>=0', KIND_PLACEHOLDER, '业务请求数（占位）');
+  }
   for (const flow of plan.flows || []) {
-    for (const step of flow.steps || []) {
+    for (const step of (flow.initSteps || []).concat(flow.steps || [])) {
       add(stepDurationMetric(step.key), 'max>=0', KIND_PLACEHOLDER, `${step.key} 响应时间（占位）`);
       add(stepFailedMetric(step.key), 'rate>=0', KIND_PLACEHOLDER, `${step.key} 错误率（占位）`);
     }

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { VideoPlay } from '@element-plus/icons-vue'
-import type { Flow } from '../../api'
+import type { DebugStep, Flow } from '../../api'
 import { useDebug } from '../../composables/useDebug'
 import { useDebugContext } from '../../composables/useDebugContext'
 import { STEP_STATUS } from '../../utils/debug'
 import { formatMs } from '../../utils/format'
+import { INIT_SEGMENT_TITLE } from '../../utils/test-data'
 import DebugErrorView from './DebugErrorView.vue'
 import DebugStepPanel from './DebugStepPanel.vue'
-import VariablesTable from './VariablesTable.vue'
 import EnvPicker from './EnvPicker.vue'
 
 const visible = defineModel<boolean>({ required: true })
@@ -18,25 +18,38 @@ const ctx = useDebugContext()
 const { running, result, error, run, reset } = useDebug()
 const opened = ref<string[]>([])
 const updatedVars = ref<string[]>([])
+/** 数据集 id → 行号（界面上从 1 开始） */
+const rowNo = ref<Record<number, number>>({})
+
+const bindings = computed(() => props.flow?.datasets ?? [])
 
 watch(visible, (open) => {
   if (open) {
     reset()
     opened.value = []
+    rowNo.value = Object.fromEntries(bindings.value.map((b) => [b.datasetId, 1]))
   }
 })
 
 const passedCount = computed(() => result.value?.steps.filter((s) => s.status === 'passed').length ?? 0)
 
+/** 初始化段和每次迭代各自从 1 编号 */
+function stepNo(step: DebugStep, index: number): number {
+  const steps = result.value?.steps ?? []
+  return steps.slice(0, index).filter((s) => (s.phase ?? 'main') === (step.phase ?? 'main')).length + 1
+}
+
 async function start(): Promise<void> {
   const env = ctx.environment.value
   if (!props.flow || !env || ctx.blocker.value) return
   if (!(await ctx.ensureProdConfirmed())) return
+  const rows: Record<string, number> = {}
+  for (const b of bindings.value) rows[String(b.datasetId)] = Math.max(0, Math.round(rowNo.value[b.datasetId] ?? 1) - 1)
   const r = await run({
     envId: env.id,
     ...(env.type === 'prod' ? { confirmProd: true } : {}),
-    vars: ctx.overrides.value,
     flowId: props.flow.id,
+    ...(bindings.value.length ? { rows } : {}),
   })
   updatedVars.value = r ? ctx.applyExtracted(r) : []
   if (r) {
@@ -52,15 +65,19 @@ async function start(): Promise<void> {
     <div class="flow-debug-bar">
       <span class="muted">发往</span>
       <EnvPicker />
-      <el-popover v-if="ctx.environment.value" placement="bottom-start" :width="860" trigger="click">
-        <template #reference>
-          <el-button text bg>
-            变量
-            <span v-if="ctx.varCount.value" class="flow-debug-count">{{ ctx.varCount.value }}</span>
-          </el-button>
-        </template>
-        <VariablesTable :env-id="ctx.environment.value.id" :initial="ctx.initialVars.value" />
-      </el-popover>
+      <span v-for="b in bindings" :key="b.datasetId" class="flow-debug-row" :title="b.columns?.join('、')">
+        <span class="flow-debug-row-name">{{ b.datasetName ?? `数据集 #${b.datasetId}` }}</span>
+        <el-input-number
+          v-model="rowNo[b.datasetId]"
+          :min="1"
+          :max="b.rowCount && b.rowCount > 0 ? b.rowCount : Infinity"
+          :precision="0"
+          controls-position="right"
+          size="small"
+          class="flow-debug-row-input"
+        />
+        <span v-if="b.rowCount" class="muted num">/ {{ b.rowCount }}</span>
+      </span>
       <span class="flow-debug-spacer" />
       <el-tooltip :content="ctx.blocker.value ?? ''" :disabled="!ctx.blocker.value" placement="top">
         <span>
@@ -82,7 +99,18 @@ async function start(): Promise<void> {
         <el-collapse-item v-for="(step, index) in result.steps" :key="step.key" :name="step.key">
           <template #title>
             <span class="flow-step-title">
-              <span class="row-index">{{ index + 1 }}</span>
+              <span class="row-index">{{ stepNo(step, index) }}</span>
+              <el-tag
+                v-if="step.phase === 'init'"
+                size="small"
+                type="warning"
+                effect="plain"
+                class="flow-step-status"
+                :title="INIT_SEGMENT_TITLE"
+                disable-transitions
+              >
+                初始化
+              </el-tag>
               <el-tag :type="STEP_STATUS[step.status].tag" size="small" effect="dark" class="flow-step-status">
                 {{ STEP_STATUS[step.status].label }}
               </el-tag>
@@ -106,6 +134,7 @@ async function start(): Promise<void> {
 }
 .flow-debug-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
@@ -117,17 +146,20 @@ async function start(): Promise<void> {
 .flow-debug-spacer {
   flex: 1;
 }
-.flow-debug-count {
-  display: inline-block;
-  min-width: 18px;
-  margin-left: 6px;
-  padding: 0 5px;
-  border-radius: 9px;
-  background: var(--el-color-primary);
-  color: #fff;
-  font-size: 11px;
-  line-height: 18px;
-  text-align: center;
+.flow-debug-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.flow-debug-row-name {
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.flow-debug-row-input {
+  width: 100px;
 }
 .flow-debug-summary {
   display: flex;

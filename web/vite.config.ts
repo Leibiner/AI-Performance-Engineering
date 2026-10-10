@@ -11,7 +11,8 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5180,
     proxy: {
-      '/api': 'http://localhost:8088',
+      // 用正则：'/api' 是前缀匹配，会把页面路由 /apis 也转给后端
+      '^/api/': 'http://localhost:8088',
     },
   },
   build: {

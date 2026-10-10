@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -29,6 +29,43 @@ def not_found(message: str) -> ApiError:
 
 def conflict(message: str, details: list[str] | None = None) -> ApiError:
     return ApiError(409, "CONFLICT", message, details)
+
+
+class BodyLimit:
+    """请求体超过上限时返回 413，不读进内存：服务没有鉴权、监听 0.0.0.0，不能让一个请求把内存撑爆。
+
+    有 Content-Length 的在读之前就拒绝；分块传输的边读边计数，超过时抛 HTTPException(413)：FastAPI 解析请求体时
+    会把其他异常一律换成 400，只原样放过 HTTPException，再由下面的处理器转成统一格式。
+    必须在 errors.install 之前注册（先注册的在里层），这样 413 也经过 CORS。"""
+
+    def __init__(self, app, limit: int):
+        self.app = app
+        self.limit = limit
+
+    def _error(self) -> ApiError:
+        return ApiError(413, "PAYLOAD_TOO_LARGE", f"请求体超过 {self.limit // (1024 * 1024)} MiB 的上限")
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        for name, value in scope.get("headers") or []:
+            if name == b"content-length" and value.isdigit() and int(value) > self.limit:
+                exc = self._error()
+                await error_response(exc.status, exc.code, exc.message)(scope, receive, send)
+                return
+        received = 0
+
+        async def limited():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.limit:
+                    raise HTTPException(413, self._error().message)
+            return message
+
+        await self.app(scope, limited, send)
 
 
 def error_response(status: int, code: str, message: str, details: list[str] | None = None) -> JSONResponse:
@@ -69,7 +106,7 @@ def _translate(err: dict) -> str:
     return f"{where} {field}：{reason}" if field else f"{where}：{reason}"
 
 
-_STATUS_CODE = {404: "NOT_FOUND", 409: "CONFLICT", 422: "PREFLIGHT_REJECTED"}
+_STATUS_CODE = {404: "NOT_FOUND", 409: "CONFLICT", 413: "PAYLOAD_TOO_LARGE", 422: "PREFLIGHT_REJECTED"}
 _STATUS_MESSAGE = {404: "资源不存在", 405: "不支持的请求方法"}
 
 

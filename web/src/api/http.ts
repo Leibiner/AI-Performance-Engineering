@@ -23,6 +23,7 @@ export type Query = Record<string, string | number | boolean | null | undefined>
 interface RequestOptions {
   query?: Query
   body?: unknown
+  accept?: string
 }
 
 function buildUrl(path: string, query?: Query): string {
@@ -73,7 +74,7 @@ function parseError(status: number, data: unknown): ApiError {
 }
 
 async function send(method: string, path: string, options: RequestOptions): Promise<Response> {
-  const init: RequestInit = { method, headers: { Accept: 'application/json' } }
+  const init: RequestInit = { method, headers: { Accept: options.accept ?? 'application/json' } }
   if (options.body !== undefined) {
     init.headers = { ...init.headers, 'Content-Type': 'application/json' }
     init.body = JSON.stringify(options.body)
@@ -104,9 +105,9 @@ export async function request<T>(
   return data as T
 }
 
-/** 读取文本类响应（如 k6.log）。 */
-export async function requestText(path: string): Promise<string> {
-  const res = await send('GET', path, {})
+/** 读取文本类响应（如 k6.log、数据集导出的 CSV）。按 UTF-8 解码。 */
+export async function requestText(path: string, query?: Query): Promise<string> {
+  const res = await send('GET', path, { query, accept: 'text/plain, text/csv, */*' })
   const text = await res.text()
   if (!res.ok) {
     let data: unknown = null

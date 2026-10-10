@@ -15,6 +15,7 @@ const routes: RouteRecordRaw[] = [
   },
   { path: '/apis', component: () => import('./views/ApisPage.vue'), meta: { title: '接口', menu: '/apis' } },
   { path: '/flows', component: () => import('./views/FlowsPage.vue'), meta: { title: '业务流程', menu: '/flows' } },
+  { path: '/data', component: () => import('./views/DataPage.vue'), meta: { title: '测试数据', menu: '/data' } },
   {
     path: '/profiles',
     component: () => import('./views/ProfilesPage.vue'),

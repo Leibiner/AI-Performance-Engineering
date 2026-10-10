@@ -1,4 +1,4 @@
-"""运行（契约 §3.2、§4、§5）：预检 → 组装 plan → 启动 k6 → 等待退出 → 补全 Run Record → 存档。
+"""运行（契约 §3.2、§4、§5）：预检 → 组装 plan、写入输入文件 → 启动 k6 → 等待退出 → 补全 Run Record → 存档。
 
 同一时间只允许 1 个运行。进程句柄放在内存里（所以服务只能单进程运行），
 “是否有运行在进行中”以库里的 status 为准。
@@ -6,6 +6,7 @@
 
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -21,11 +22,13 @@ from typing import Any
 from fastapi import APIRouter, Body
 from fastapi.responses import Response
 
-from . import config, db, executors
+from . import config, datasets, db, executors, files
 from .errors import ApiError, bad_request, conflict, not_found
-from .resources import APIS, ENVIRONMENTS, FLOWS, PROFILES, TESTS, get_obj
+from .plan import FlowSpec, build_plan, expand_flow, normalized_weights, write_inputs
+from .resources import ENVIRONMENTS, FLOWS, PROFILES, TESTS, get_obj
 from .system import VERDICTS, fingerprint, running_run_id
 from .validators import base_url_problem, config_shape_problem, is_int, is_num, profile_usage
+from .variables import source_problems
 
 log = logging.getLogger("uvicorn.error")
 
@@ -39,6 +42,9 @@ ARTIFACTS = {
     "dashboard.html": "text/html; charset=utf-8",
     "k6.log": "text/plain; charset=utf-8",
 }
+
+# k6 每个 VU 各持有一份用到的文件，加上 init 阶段的两份（契约 §3.2 第 10 条）
+FILE_MEMORY_LIMIT = 2 * 1024 * 1024 * 1024
 
 # k6 的退出码（契约 §5）
 EXIT_OK = (0, 99, 110)  # 正常结束 / 阈值未通过 / 脚本调用 exec.test.fail()
@@ -186,8 +192,87 @@ def _limit_problems(profile: dict, env: dict) -> list[str]:
     return problems
 
 
+def apportion(total: int, weights: list[float]) -> list[int]:
+    """照搬 perf/core/compose.js 的 apportion：把整数 total 按权重拆成整数，每份至少 1，和为 total（最大余数法）。
+
+    预检要知道引擎给每个流程分了多少次迭代，所以必须和引擎逐步一致。调用方保证 total 是不小于份数的正整数。
+    """
+    n = len(weights)
+    ideal = [w * total for w in weights]
+    parts = [max(1, math.floor(v + 1e-9)) for v in ideal]
+    current = sum(parts)
+    while current != total:
+        over = current > total
+        pick = -1
+        for i in range(n):
+            if over and parts[i] <= 1:
+                continue
+            gap = parts[i] - ideal[i] if over else ideal[i] - parts[i]
+            if pick == -1 or gap > (parts[pick] - ideal[pick] if over else ideal[pick] - parts[pick]):
+                pick = i
+        parts[pick] += -1 if over else 1
+        current += -1 if over else 1
+    return parts
+
+
+def _total_vus(cfg: dict) -> tuple[str, Any]:
+    return ("vus", cfg.get("vus")) if "vus" in cfg else ("preAllocatedVus", cfg.get("preAllocatedVus"))
+
+
+def _exhaustion_problems(profile: dict, specs: list[FlowSpec]) -> list[str]:
+    """预检第 9 条里和负载有关的部分：onExhausted 为 stop 时，数据集事先就能看出不够用的情况。"""
+    problems: list[str] = []
+    cfg = profile["config"]
+    vus_field, total_vus = _total_vus(cfg)
+    for spec in specs:
+        for b in spec.datasets:
+            ds = b["dataset"]
+            if b["pick"] == "perVu" and b["onExhausted"] == "stop" and is_num(total_vus) and total_vus > ds["rowCount"]:
+                problems.append(
+                    f"业务流程“{spec.name}”绑定的数据集“{ds['name']}”取法为每个 VU 固定一行、用完时停止测试，"
+                    f"但负载配置的总 VU 数 {_fmt(total_vus)}（{vus_field}）超过了它的行数 {ds['rowCount']}"
+                )
+
+    # 按顺序：只有固定迭代数形态事先知道迭代数。k 个流程共用一个数据集时，第 offset 个流程取第
+    # iterationInTest × k + offset 行（plan 的 stride / offset），所以分到 n 次迭代的流程最多用到
+    # (n − 1) × k + offset 行。只看用完时停止测试的绑定：循环使用的永远不会触发数据用完
+    iterations = cfg.get("iterations")
+    if set(cfg) != {"vus", "iterations", "maxDurationSec"} or not is_int(iterations) or iterations < len(specs):
+        return problems
+    weights = normalized_weights(normalized_weights([spec.weight for spec in specs]))  # plan 的权重，再按引擎的方式归一化
+    per_flow = apportion(iterations, weights)
+    sharing: dict[int, list[tuple[FlowSpec, int, dict]]] = {}
+    for spec, n in zip(specs, per_flow):
+        for b in spec.datasets:
+            if b["pick"] == "sequential":
+                sharing.setdefault(b["dataset"]["id"], []).append((spec, n, b))
+    for items in sharing.values():
+        k = len(items)
+        names = "、".join(f"“{spec.name}”" for spec, _, _ in items)
+        for offset, (spec, n, b) in enumerate(items):
+            ds = b["dataset"]
+            needed = (n - 1) * k + offset + 1
+            if b["onExhausted"] != "stop" or needed <= ds["rowCount"]:
+                continue
+            if k == 1:
+                problems.append(
+                    f"业务流程“{spec.name}”按顺序使用数据集“{ds['name']}”、用完时停止测试：按权重分到 {n} 次迭代，"
+                    f"需要 {n} 行，数据集只有 {ds['rowCount']} 行"
+                )
+            else:
+                problems.append(
+                    f"业务流程“{spec.name}”按顺序使用数据集“{ds['name']}”、用完时停止测试：这个数据集被 {k} 个业务流程"
+                    f"按顺序共用（{names}），每个流程隔 {k} 行取一行，它分到 {n} 次迭代、从第 {offset + 1} 行开始，"
+                    f"需要 ({n} − 1) × {k} + {offset + 1} = {needed} 行，数据集只有 {ds['rowCount']} 行"
+                )
+    return problems
+
+
 def _preflight(conn, test_id: int, profile_id: int, env_id: int, executor_id: int | None, confirm_prod: bool):
-    """预检里不涉及“是否已有运行”和 k6 的部分。通过时返回 (test, profile, env, 执行机, 展开的流程)，否则抛 422。"""
+    """预检里不涉及“是否已有运行”和 k6 的部分。
+
+    通过时返回 (test, profile, env, 执行机, 展开的流程, 用到的文件)，否则抛 422。
+    """
     details: list[str] = []
     test = get_obj(conn, TESTS, test_id)
     profile = get_obj(conn, PROFILES, profile_id)
@@ -202,7 +287,9 @@ def _preflight(conn, test_id: int, profile_id: int, env_id: int, executor_id: in
     if executor is None:
         details.append("没有可用的执行机" if executor_id is None else f"执行机 #{executor_id} 不存在")
 
-    expanded = []
+    specs: list[FlowSpec] = []
+    complete: list[bool] = []
+    cache: dict[int, dict] = {}
     if test is not None:
         if not test["flows"]:
             details.append(f"测试“{test['name']}”没有选择任何业务流程")
@@ -211,16 +298,9 @@ def _preflight(conn, test_id: int, profile_id: int, env_id: int, executor_id: in
             if flow is None:
                 details.append(f"测试引用的业务流程 #{item['flowId']} 不存在")
                 continue
-            if not flow["steps"]:
-                details.append(f"业务流程“{flow['name']}”没有任何步骤")
-            steps = []
-            for index, step in enumerate(flow["steps"], 1):
-                api = get_obj(conn, APIS, step["apiId"])
-                if api is None:
-                    details.append(f"业务流程“{flow['name']}”第 {index} 步引用的接口 #{step['apiId']} 不存在")
-                    continue
-                steps.append((step, api))
-            expanded.append((item, flow, steps))
+            spec, ok = expand_flow(conn, flow, item["weight"], details, cache)
+            specs.append(spec)
+            complete.append(ok)
 
     if env is not None:
         problem = base_url_problem(env["baseUrl"])
@@ -230,11 +310,13 @@ def _preflight(conn, test_id: int, profile_id: int, env_id: int, executor_id: in
             details.append(
                 f"被测环境“{env['name']}”是生产环境，生产环境需要二次确认：请确认后在请求里带上 \"confirmProd\": true 再发起"
             )
+    shape_ok = False
     if profile is not None:
         shape_problem = config_shape_problem(profile["model"], profile["config"])
         if shape_problem:
             details.append(f"负载配置“{profile['name']}”不属于支持的四种形态：{shape_problem}")
         else:
+            shape_ok = True
             if env is not None:
                 details.extend(_limit_problems(profile, env))
             # 执行引擎把每个流程编成一个 k6 scenario，并发和迭代数按权重拆成整数，每个流程至少分到 1；
@@ -249,52 +331,33 @@ def _preflight(conn, test_id: int, profile_id: int, env_id: int, executor_id: in
                         "无法给每个流程至少分配 1"
                     )
 
+    # 第 8、9 条：流程里有接口或数据集找不到时，那个流程的检查结果没有意义，先让人修好上面的问题
+    for spec, ok in zip(specs, complete):
+        if not ok:
+            continue
+        details.extend(datasets.binding_problems(spec.name, spec.datasets, spec.variables))
+        if env is not None:
+            details.extend(source_problems(spec.name, env, spec.init_steps, spec.steps, spec.datasets, spec.variables))
+    if shape_ok and specs and all(complete) and test is not None and len(specs) == len(test["flows"]):
+        details.extend(_exhaustion_problems(profile, specs))
+
+    # 第 10 条
+    used_files, file_problems = files.load_for_steps(conn, [api for spec in specs for api in spec.apis()])
+    details.extend(file_problems)
+    total_size = sum(f["size"] for f in used_files.values())
+    if shape_ok and total_size:
+        vus_field, total_vus = _total_vus(profile["config"])
+        if is_num(total_vus) and (total_vus + 2) * total_size > FILE_MEMORY_LIMIT:
+            mib = 1024 * 1024
+            details.append(
+                f"本次运行用到的文件共 {files.fmt_size(total_size)}（{total_size} 字节），k6 每个 VU 各持有一份："
+                f"（总 VU 数 {_fmt(total_vus)} + 2）× {total_size / mib:.2f} MiB = "
+                f"{(total_vus + 2) * total_size / mib:.1f} MiB，超过 {FILE_MEMORY_LIMIT // mib} MiB（2 GiB）的上限"
+            )
+
     if details:
         raise ApiError(422, "PREFLIGHT_REJECTED", "预检不通过，运行没有发起", details)
-    return test, profile, env, executor, expanded
-
-
-def _build_plan(run_id: str, test: dict, profile: dict, env: dict, expanded: list) -> dict:
-    total_weight = sum(item["weight"] for item, _, _ in expanded)
-    flows = []
-    for i, (item, flow, steps) in enumerate(expanded, 1):
-        flow_key = f"f{i}"
-        flows.append({
-            "key": flow_key,
-            "name": flow["name"],
-            "weight": item["weight"] / total_weight,
-            "steps": [
-                {
-                    "key": f"{flow_key}s{j}",
-                    "name": api["name"],
-                    "method": api["method"],
-                    "path": api["path"],
-                    "headers": api["headers"],
-                    "body": api["body"],
-                    "expectStatus": api["expectStatus"],
-                    "expectBodyContains": api["expectBodyContains"],
-                    "extracts": api["extracts"],
-                    "thinkTimeMs": step["thinkTimeMs"],
-                }
-                for j, (step, api) in enumerate(steps, 1)
-            ],
-        })
-    return {
-        "schemaVersion": 1,
-        "runId": run_id,
-        "test": {"id": test["id"], "name": test["name"]},
-        "env": {
-            "id": env["id"], "name": env["name"], "type": env["type"],
-            "baseUrl": env["baseUrl"].rstrip("/"), "headers": env["headers"],
-            "variables": env.get("variables") or {},
-        },
-        "profile": {
-            "id": profile["id"], "name": profile["name"], "type": profile["type"],
-            "model": profile["model"], "config": profile["config"],
-        },
-        "flows": flows,
-        "slo": test["slo"],
-    }
+    return test, profile, env, executor, specs, used_files
 
 
 def _write_json(path: Path, data: Any) -> None:
@@ -310,6 +373,8 @@ def _spawn(run_id: str, k6: Path) -> subprocess.Popen:
     out = run_dir(run_id)
     env = os.environ.copy()
     env.update({
+        # 遇到不认识的 import 时 k6 默认会联网向 Grafana 的构建服务请求下载扩展（契约 §4）
+        "K6_AUTO_EXTENSION_RESOLUTION": "false",
         "K6_WEB_DASHBOARD": "true",
         # 只监听本机：k6 在有浏览器连着实时仪表盘时不会退出，所以不对外开放，
         # 开着它只是为了在结束时导出 dashboard.html。
@@ -579,7 +644,7 @@ def create_run(payload: Any = Body(...)):
 
     with _start_lock:
         with db.connect() as conn:
-            test, profile, env, executor, expanded = _preflight(
+            test, profile, env, executor, specs, used_files = _preflight(
                 conn, payload["testId"], payload["profileId"], payload["envId"], executor_id, confirm_prod is True
             )
             running = running_run_id(conn)
@@ -597,10 +662,26 @@ def create_run(payload: Any = Body(...)):
         now = datetime.now(timezone.utc)
         run_id = f"{now.strftime('%Y%m%dT%H%M%SZ')}-{secrets.token_hex(3)}"
         started_at = db.iso(now)
-        plan = _build_plan(run_id, test, profile, env, expanded)
+        plan, inputs = build_plan(
+            run_id,
+            test={"id": test["id"], "name": test["name"]},
+            env=env,
+            profile={
+                "id": profile["id"], "name": profile["name"], "type": profile["type"],
+                "model": profile["model"], "config": profile["config"],
+            },
+            flows=specs,
+            slo=test["slo"],
+            files=used_files,
+        )
         folder = run_dir(run_id)
-        folder.mkdir(parents=True, exist_ok=False)
-        _write_json(folder / "plan.json", plan)
+        try:
+            folder.mkdir(parents=True, exist_ok=False)
+            _write_json(folder / "plan.json", plan)
+            write_inputs(folder, inputs)  # 数据集和文件放在 plan.json 旁边，k6 按相对路径读
+        except OSError as exc:
+            shutil.rmtree(folder, ignore_errors=True)
+            raise ApiError(500, "INTERNAL", f"写入运行目录失败：{exc}") from exc
 
         with db.connect() as conn:
             conn.execute(

@@ -10,6 +10,7 @@
 | 免 sudo 安装工具 | 本机没有 sudo 权限，也没有 Docker。k6 和 Node 都提供免安装的压缩包，解压到项目内的 `.tools/` 即可使用；`scripts/setup.sh` 固定版本，`source scripts/env.sh` 把它们放到 PATH 最前面 | 2026-09-30 |
 | Node 只用于前端 | uv 只管 Python，前端（Vue）的依赖仍然用 npm。系统自带 Node v18.19.1 已停止维护，项目用自带的 Node v24.21.0 构建前端 | 2026-09-30 |
 | k6 版本 | k6 v2.3.0，从 GitHub Releases 下载 `k6-v2.3.0-linux-amd64.tar.gz` | 2026-09-30 |
+| `.gitignore` 要锚定到根 | 原来的 `data/` 会匹配任意层级叫 data 的目录，新加的 `web/src/components/data/` 被静默忽略，`git add -A` 不报错，差点漏提交。运行时目录改成 `/data/`、`/results/`、`/logs/`；提交前用 `comm` 对比 `find` 和 `git ls-files --cached` 确认源文件都被跟踪 | 2026-10-10 |
 | 从 Windows 访问 | 服务器地址 `192.168.0.136`，用户从 Windows 通过 SSH 连接。服务监听 `0.0.0.0:8088`，浏览器直接用 IP 加端口访问 | 2026-09-30 |
 | 后台启动服务 | `scripts/start.sh` 用 `nohup setsid` 启动并记录进程号，退出终端后服务仍在；`scripts/stop.sh` 对整个进程组发 SIGTERM。`uv run` 会把 SIGTERM 转发给子进程，uvicorn 能正常优雅退出 | 2026-09-30 |
 | `pkill -f` 会杀到自己 | 在一条命令里写 `pkill -f "某字符串"`，当前 shell 的命令行也包含这个字符串，会把自己一起结束。改用进程号文件停止服务 | 2026-09-30 |
@@ -42,6 +43,15 @@
 | 调试的 k6 参数 | `--no-thresholds` 不评估阈值（退出码恒为 0，107 仍表示 init 阶段异常）；`--quiet` 去掉进度条；`--no-usage-report` 省掉结束时的匿名统计上报；`K6_WEB_DASHBOARD=false` 不开仪表盘。1 次请求的调试从启动到退出约 65 ms（本机目标）到 600 ms（百度，含 TLS） | 2026-10-09 |
 | 连接被拒时 k6 给的响应 | `status` 0、`body` 空、`timings` 全 0、`error` 为 `dial: connection refused`、`error_code` 1212，不抛异常。状态码检查不通过，所以调试里是 `failed`（带 error 文字）而不是 `error` | 2026-10-09 |
 | 什么会让脚本抛异常 | 路径里有空格时 k6 自动编码后照发（目标返回 404），不抛；真正抛的是 init 阶段 `new RegExp` 编译提取规则里写错的正则（`SyntaxError: Unterminated group`），k6 以 107 退出、没有任何记录。所以后端对 107 的提示直接点名"正则写错" | 2026-10-09 |
+| **未知 import 会联网** | k6 v2.3.0 默认开启 Automatic extension resolution：脚本 import 一个不存在的模块（如 `k6/csv`）时，k6 会向 Grafana 的构建服务 `ingest.k6.io` 发 POST 请求下载扩展（请求里只有模块名和平台），`k6 inspect` 同样会触发。只用内置模块（含 `k6/experimental/*`）时不触发。后端启动 k6、`scripts/env.sh` 都设 `K6_AUTO_EXTENSION_RESOLUTION=false`，未知 import 直接以 107 失败 | 2026-10-10 |
+| 内置模块清单 | 能直接 import：`k6`、`k6/http`、`k6/data`、`k6/execution`、`k6/crypto`、`k6/encoding`、`k6/metrics`、`k6/html`、`k6/timers`、`k6/ws`、`k6/websockets`、`k6/net/grpc`、`k6/browser`、`k6/secrets`。**没有非 experimental 的 CSV 模块**（只有 `k6/experimental/csv`，项目禁用），所以 CSV 由后端解析。WebCrypto 已是全局：`crypto.randomUUID()` 直接可用；但 `import crypto from 'k6/crypto'` 会把全局的遮住。全局有 `TextEncoder` / `TextDecoder`，没有 `URL`、`URLSearchParams`、`FormData`、`btoa` | 2026-10-10 |
+| `SharedArray` | 回调在整个测试里只执行一次（init 代码本身执行 VU 数 + 2 次），所有 VU 共享一份。取出的元素是深度冻结的拷贝。**同名的 SharedArray 会直接拿到第一次的数据**，所以名字带上数据集 key 和内容摘要。5 万行 × 5 列（JSON 6 MiB）在 5 个 VU 下：SharedArray 最大 RSS 约 142 MB；内嵌进 plan、每个 VU 各解析一次约 420 MB，每多一个 VU 多约 70 MB。所以数据集写成单独的文件，不进 plan | 2026-10-10 |
+| 取行用的执行信息 | `exec.scenario.iterationInTest` 在四种 executor 下都从 0 连续、唯一，被丢弃的迭代不占号；但**按 scenario 各自从 0 开始**，多个流程共用一个数据集要错开（后端给 `stride` / `offset`）。`exec.vu.idInTest` 从 1 开始、整个测试唯一，但分给哪个 scenario 每次运行都不同。`exec.vu.iterationInScenario` 是 VU 在本 scenario 内的迭代序号。`exec.*` 在 init 阶段访问会抛错 | 2026-10-10 |
+| 数据用完怎么停 | k6 没有只停一个 VU 或一个 scenario 的 API。`exec.test.abort()` 退出码 108（后端判 `aborted`，像有人点了停止）；`exec.test.fail()` 退出码 110 且测试继续（判 `failed`，语义不对）。采用：计数指标 `data_exhausted` + 阈值 `{threshold: 'count==0', abortOnFail: true}`，约 2 秒内停止、退出码 99、`handleSummary` 照常执行、判 `invalid`。从没计数时阈值判为通过。停之前的几秒里，closed 模型下的空迭代要 `sleep(1)`，否则 constant-vus 每秒空转几万次 | 2026-10-10 |
+| 每个 VU 登录一次 | 模块级变量在同一个 VU 的迭代之间保留（四种 executor 都是，到达率 executor 复用 VU 时也在）。用"状态为空"判断要不要登录：失败了下次迭代自动重试；用 `iterationInInstance === 0` 判断首次时，第一次失败就再也不会重试。状态要按流程（scenario 名）分开存。k6 默认每次迭代清空 Cookie 罐，会话 Cookie 要跨迭代保留：**不要**用全局的 `noCookiesReset: true` 再在没有初始化段的流程里 `http.cookieJar().clear(baseUrl)`——审查实测 `clear(url)` 只删这个地址的主机和默认路径下的 Cookie，带 `Domain`、`Path` 不是 `/`、经重定向由别的主机设置的都会漏到下一轮。改为有初始化段的流程 `new http.CookieJar()` 存进 VU 状态、每个请求传 `jar` 参数（跨重定向、跨主机都隔离），重新初始化时换新罐；没有初始化段的流程不传 `jar`，仍用默认罐。初始化段失败时 closed 模型等 1 秒（实测不等时 1 个 VU 2 秒内无间隔重试登录 49 次） | 2026-10-10 |
+| `res.json(路径)` 是 GJSON | 支持 `a.b.0.c`、`a.#`（长度）、`a.#(k=="v").id`（条件查询）、`a.#.id`（全部）、`a\.b`（键名带点）；不支持 `$.` 和 `[0]`，引擎先换写法。只有 `$`、`$.`、`$[` 开头才去掉 `$`：`$id`、`$ref` 这种键名本身以 `$` 开头，去掉会静默取到 `id` 字段（审查实测）；条件查询 `#(...)` 里的 `[` 不能改写。响应不是 JSON 时带路径的调用返回 undefined，不抛；不带路径的 `res.json()` 会抛。旧引擎逐级取 JS 属性，`items.length`、`a..b`、尾点都能用，换成 GJSON 后要兼容（`.length` 取不到时再试 `.#`） | 2026-10-10 |
+| multipart | k6 的对象写法（`{field: 'x', file: http.file(...)}`）字段顺序随机（30 次出现 6 种顺序），且请求头里只要有 `Content-Type`（含环境公共请求头里的）boundary 就丢了。引擎改为用 `TextEncoder` + `Uint8Array` 按顺序手工拼装，并强制换成带 boundary 的 `Content-Type`；对本机回显目标验证字节完全一致（文件里夹着 `\r\n` 和 `--` 也正确），`"` 按浏览器的做法转义成 `%22`。`open(路径, 'b')` 每个 VU 各持有一份，内存约为"文件大小 ×（VU 数 + 2）"，每个正在上传的请求另外临时占 3–4 倍文件大小 | 2026-10-10 |
+| 表单的 Content-Type | 被测环境公共请求头里常有 `Content-Type: application/json`，合并后会压过表单类型，服务端拿到的是 JSON 类型的表单串（实测）。规则改为：`form` 只认接口自己写的 `Content-Type`，否则设 `application/x-www-form-urlencoded`；编码按 WHATWG（空格为 `+`，`!'()~` 也编码），顺序按定义 | 2026-10-10 |
 
 ## 3. 后端
 
@@ -80,6 +90,12 @@
 | 调试目录 | `results/_debug/<debugId>/`，`finally` 里整个删掉；服务启动时清理上次遗留的。产物接口的 runId 正则匹配不到 `_debug`，运行列表来自库，互不影响 | 2026-10-09 |
 | 500 的 details 放日志 | `DEBUG_FAILED` 的 `details` 是 `k6.log` 的最后 30 行；JSON 格式的日志行转成 `[level] msg：error` 的样子。前端对这个 code 用等宽文本整块显示，其他错误逐条列出 | 2026-10-09 |
 | 用本机小目标做端到端 | 一个标准库 `http.server` 脚本（JSON、POST 回显、302、PNG、4 秒慢响应、404）放在临时目录，配合第二个后端实例（换 `DATA_DIR` / `RESULTS_DIR`、端口 8099）把变量传递、提取、跳过、409、500 都走到，不动正式库也几乎不碰百度 | 2026-10-09 |
+| 第二个实例要换仪表盘端口 | 集成实例真跑 k6 时也会监听 `127.0.0.1:5665`，和正式服务的运行冲突。起第二个实例时加 `K6_WEB_DASHBOARD_PORT=5675` | 2026-10-10 |
+| **`str.splitlines()` 会切碎调试记录** | 它除了 `\n` 还在 U+0085、U+2028、`\x1c`–`\x1e` 等处断行；响应体里的这些字符在 k6 的 JSON 日志里不转义（JSON 只要求转义 `< 0x20`）。上传二进制文件、目标原样回显时，一行 `debugTrace` 被切成几段，后端报"没有产出调试记录"。读 `--console-output` 文件一律 `split("\n")` | 2026-10-10 |
+| Python 和 JS 的 `\s` 不一样 | Python 的 `\s` 多 `\x1c`–`\x1f`、`\x85`，少 `﻿`；`\d` 认全角和其他文字的数字。后端要和引擎认出同样的引用，正则里把 JS 的空白字符类显式写出来，数字用 `[0-9]` | 2026-10-10 |
+| 请求体大小上限 | 服务没有鉴权、监听 `0.0.0.0`。没有上限时一个 200 MB 的 base64 请求把进程 RSS 撑到约 900 MB 才返回"超过 10 MiB"（审查实测）。现在纯 ASGI 中间件按 `Content-Length` 先拒绝（413），分块传输边读边计数；后者要抛 FastAPI 的 `HTTPException`：FastAPI 解析请求体时会把其他异常一律换成 400 | 2026-10-10 |
+| sqlite 存不下超过 64 位的整数 | 把 `2**70` 之类的 id 交给 sqlite 会抛 `OverflowError`，变成 500。`is_int` 加上 ±2^63 的范围 | 2026-10-10 |
+| 上传文件的头注入 | `contentType` 会原样进响应头和 multipart 的分段头，校验正则里不能用 `\s`（放过 `\r\n`）。下载响应带 `nosniff` 和 `CSP: sandbox`，防止上传的 HTML 在本站执行脚本 | 2026-10-10 |
 
 ## 4. 前端
 

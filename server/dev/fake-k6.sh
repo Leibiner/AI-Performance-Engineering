@@ -112,6 +112,7 @@ echo "fake-k6: run $RUN_ID（睡 ${SLEEP}s，退出码 $EXIT_CODE，k6Verdict $V
 echo "fake-k6: PLAN_FILE=$PLAN_FILE"
 echo "fake-k6: OUTPUT_DIR=$OUTPUT_DIR"
 echo "fake-k6: K6_WEB_DASHBOARD=${K6_WEB_DASHBOARD:-} HOST=${K6_WEB_DASHBOARD_HOST:-} PORT=${K6_WEB_DASHBOARD_PORT:-} PERIOD=${K6_WEB_DASHBOARD_PERIOD:-}"
+echo "fake-k6: K6_AUTO_EXTENSION_RESOLUTION=${K6_AUTO_EXTENSION_RESOLUTION:-（未设置）}"
 echo "fake-k6: cwd=$(pwd)"
 
 # sleep 放后台再 wait：bash 要等前台命令结束才执行 trap，这样写才能立刻响应 SIGINT

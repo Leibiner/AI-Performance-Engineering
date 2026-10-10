@@ -34,6 +34,16 @@ watch(text, (value) => {
 })
 
 const headerRows = computed(() => Object.entries(parsed.value?.input.headers ?? {}))
+const formRows = computed(() => {
+  const r = parsed.value
+  if (!r || r.input.bodyType !== 'multipart') return []
+  let fileIndex = 0
+  return r.input.form.map((item) => ({
+    name: item.name,
+    file: item.type === 'file',
+    value: item.type === 'file' ? `@${r.files[fileIndex++]?.path ?? ''}` : item.value,
+  }))
+})
 
 function confirm(): void {
   if (!parsed.value) return
@@ -67,6 +77,20 @@ function confirm(): void {
         </tbody>
       </table>
       <pre v-if="parsed.input.body !== null" class="curl-body">{{ parsed.input.body }}</pre>
+      <template v-if="formRows.length">
+        <div class="curl-sub">form-data</div>
+        <table class="curl-table">
+          <tbody>
+            <tr v-for="(row, index) in formRows" :key="index">
+              <th>{{ row.name }}</th>
+              <td class="mono">
+                {{ row.value }}
+                <el-tag v-if="row.file" type="warning" size="small" effect="plain" class="curl-file-tag">导入后选择文件</el-tag>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
     </div>
 
     <template #footer>
@@ -109,6 +133,14 @@ function confirm(): void {
 .curl-table th {
   width: 200px;
   font-weight: 500;
+}
+.curl-sub {
+  margin-top: 10px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.curl-file-tag {
+  margin-left: 6px;
 }
 .curl-body {
   max-height: 160px;

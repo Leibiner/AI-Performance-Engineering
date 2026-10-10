@@ -1,10 +1,10 @@
 # 项目自带工具链（scripts/setup.sh 下载）
 .tools/
 
-# 运行时数据：SQLite 数据库、运行产物、日志、进程号
-data/
-results/
-logs/
+# 运行时数据：SQLite 数据库、运行产物、日志、进程号（只指仓库根目录下的；不锚定时会连 web/src/components/data/ 也忽略掉）
+/data/
+/results/
+/logs/
 *.pid
 
 # 依赖与构建产物

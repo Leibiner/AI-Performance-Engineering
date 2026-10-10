@@ -6,11 +6,13 @@
 //   k6 inspect perf/runner.js -e PLAN_FILE=/abs/plan.json
 // 调试（plan 带 debug 段，契约 §3.5）：后端另加 --no-thresholds --log-format=json --console-output=<文件>，
 // 迭代结束后本脚本把逐步记录 console.log 成一行 JSON（契约 §5.1）。
+// 手动运行时同样带 K6_AUTO_EXTENSION_RESOLUTION=false：k6 遇到不认识的 import 默认会联网下载扩展。
 //
 // 业务流程是数据，不是代码，所以只导出一个执行函数 runFlow：
 // 每个 flow 是一个 scenario（名称 = flow.key），运行时用 exec.scenario.name 找回对应的 flow。
 
 import exec from 'k6/execution';
+import { SharedArray } from 'k6/data';
 import { compose } from './core/compose.js';
 import { compileFlows, executeFlow } from './core/interp.js';
 import { summarize } from './core/summary.js';
@@ -22,7 +24,18 @@ if (!__ENV.PLAN_FILE) {
 // open() 只能在 init 阶段调用；相对路径是相对于本文件所在目录，所以要求传绝对路径
 const plan = JSON.parse(open(__ENV.PLAN_FILE));
 const built = compose(plan);
-const flows = compileFlows(plan);
+
+// 数据集和文件放在 plan.json 旁边（契约 §4），路径是相对 plan 所在目录的
+const planDir = __ENV.PLAN_FILE.replace(/[\\/][^\\/]*$/, '');
+const datasets = {};
+for (const ds of plan.datasets || []) {
+  const path = `${planDir}/${ds.file}`;
+  // 回调在整个测试里只执行一次，所有 VU 共享一份。同名的 SharedArray 会直接拿到第一次的数据，所以名字带上内容摘要
+  datasets[ds.key] = new SharedArray(`ds:${ds.key}:${ds.sha256}`, () => JSON.parse(open(path)));
+}
+const files = {};
+for (const f of plan.files || []) files[f.key] = open(`${planDir}/${f.file}`, 'b');
+const flows = compileFlows(plan, { datasets, files });
 
 // 调试模式的配置；压测时为 null
 const debug =

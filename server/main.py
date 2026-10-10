@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 
-from . import config, db, debug, errors, executors, resources, runs, seed, system
+from . import config, datasets, db, debug, errors, executors, files, resources, runs, seed, system
 
 log = logging.getLogger("uvicorn.error")
 
@@ -39,6 +39,8 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
 )
 
+# 数据集和文件的上限是 10 MiB；base64 和 JSON 转义之后也远小于 32 MiB
+app.add_middleware(errors.BodyLimit, limit=32 * 1024 * 1024)
 errors.install(app)  # 内含兜底 500 的中间件，必须在 CORS 之前注册
 app.add_middleware(
     CORSMiddleware,
@@ -50,6 +52,8 @@ app.add_middleware(
 
 for router in resources.routers:
     app.include_router(router)
+app.include_router(datasets.router)
+app.include_router(files.router)
 app.include_router(runs.router)
 app.include_router(debug.router)
 app.include_router(executors.router)

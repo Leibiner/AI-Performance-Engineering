@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Delete, Plus, RefreshLeft } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { ArrowDown, ArrowRight, Delete, Plus, RefreshLeft } from '@element-plus/icons-vue'
 import { useApiIndex } from '../../composables/useApiIndex'
 import { useDebugContext } from '../../composables/useDebugContext'
+import { copyText } from '../../utils/clipboard'
+import { DYNAMIC_VARS, isValidVarName } from '../../utils/vars'
 
 // 一个被测环境的全部变量：初始值（存在环境上，压测用）、当前值（浏览器里，调试用，空着就用初始值）、
 // 来源（环境定义 / 哪个接口提取）、被哪些接口引用。
@@ -67,7 +70,7 @@ const newValue = ref('')
 const nameError = computed(() => {
   const n = newName.value.trim()
   if (!n) return ''
-  if (!/^\w+$/.test(n)) return '只能用字母、数字、下划线'
+  if (!isValidVarName(n)) return '只能用字母（含中文）、数字、下划线'
   if (rows.value.some((r) => r.name === n)) return '已存在'
   return ''
 })
@@ -78,6 +81,11 @@ function add(): void {
   else setCurrent(n, newValue.value)
   newName.value = ''
   newValue.value = ''
+}
+
+const dynamicOpen = ref(false)
+async function copyExample(text: string): Promise<void> {
+  if (await copyText(text)) ElMessage.success(`已复制 ${text}`)
 }
 
 void index.refresh()
@@ -164,6 +172,23 @@ void index.refresh()
       <el-button :icon="Plus" size="small" :disabled="!newName.trim() || !!nameError" @click="add">添加</el-button>
       <span v-if="nameError" class="add-error">{{ nameError }}</span>
     </div>
+    <div class="dynamic">
+      <button type="button" class="dynamic-toggle" @click="dynamicOpen = !dynamicOpen">
+        <el-icon><ArrowDown v-if="dynamicOpen" /><ArrowRight v-else /></el-icon>动态变量
+      </button>
+      <table v-if="dynamicOpen" class="dynamic-table">
+        <tbody>
+          <tr v-for="d in DYNAMIC_VARS" :key="d.name" :title="d.meaning">
+            <td class="mono dynamic-name">
+              {{ d.name }}<span v-if="d.aliases" class="muted">（{{ d.aliases.join('、') }}）</span>
+            </td>
+            <td>
+              <button type="button" class="mono dynamic-example" @click="copyExample(d.example)">{{ d.example }}</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
@@ -238,5 +263,43 @@ void index.refresh()
 .add-error {
   color: var(--el-color-danger);
   font-size: 12px;
+}
+.dynamic {
+  margin-top: 10px;
+}
+.dynamic-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.dynamic-toggle:hover {
+  color: var(--el-color-primary);
+}
+.vars-table .dynamic-table {
+  margin-top: 4px;
+}
+.vars-table .dynamic-table td {
+  padding: 3px 8px;
+}
+.dynamic-name {
+  width: 18%;
+  white-space: nowrap;
+}
+.dynamic-example {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: #1d6fd6;
+  cursor: copy;
+}
+.dynamic-example:hover {
+  text-decoration: underline;
 }
 </style>

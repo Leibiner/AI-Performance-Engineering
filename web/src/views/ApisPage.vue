@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { apisApi, foldersApi, type ApiDef, type Folder } from '../api'
 import { useResourceList } from '../composables/useResourceList'
 import { confirmAction, showError } from '../utils/feedback'
-import { emptyForm, fromApi, snapshot, toInput, type ApiForm } from '../utils/api-form'
+import { emptyForm, formProblem, fromApi, snapshot, toInput, type ApiForm } from '../utils/api-form'
 import type { CurlImport } from '../utils/curl'
 import { buildFolderTree, folderOptions, folderPath } from '../utils/folders'
 import { useApiIndex } from '../composables/useApiIndex'
@@ -153,6 +153,11 @@ async function save(): Promise<void> {
     ElMessage.warning('路径必须以 / 开头')
     return
   }
+  const problem = formProblem(form.value)
+  if (problem) {
+    ElMessage.warning(problem)
+    return
+  }
   saving.value = true
   try {
     const saved = selectedId.value === null ? await apisApi.create(input) : await apisApi.update(selectedId.value, input)
@@ -205,6 +210,7 @@ async function del(): Promise<void> {
         <ApiEditor
           v-if="form"
           v-model="form"
+          :api-id="selectedId"
           :is-new="isNew"
           :dirty="dirty"
           :saving="saving"

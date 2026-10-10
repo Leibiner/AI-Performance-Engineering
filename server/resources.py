@@ -1,4 +1,7 @@
-"""定义类资源（环境、接口、业务流程、负载配置、测试）的统一增删改查（契约 §3.1）。"""
+"""定义类资源（环境、文件夹、接口、业务流程、负载配置、测试）的统一增删改查（契约 §3.1）。
+
+数据集和文件的写入方式不同（上传、解析），在 datasets.py、files.py。
+"""
 
 import sqlite3
 from dataclasses import dataclass
@@ -92,12 +95,18 @@ def _decorated(conn: sqlite3.Connection, res: Resource, objs: list[dict]) -> lis
 
 def _decorate_flows(flows: list[dict], conn: sqlite3.Connection) -> None:
     apis = {r["id"]: r for r in conn.execute("SELECT id, name, method, path FROM apis")}
+    datasets = {r["id"]: r for r in conn.execute("SELECT id, name, columns, row_count FROM datasets")}
     for flow in flows:
-        for step in flow["steps"]:
+        for step in flow["initSteps"] + flow["steps"]:
             api = apis.get(step["apiId"])
             step["apiName"] = api["name"] if api else None
             step["method"] = api["method"] if api else None
             step["path"] = api["path"] if api else None
+        for binding in flow["datasets"]:
+            ds = datasets.get(binding["datasetId"])
+            binding["datasetName"] = ds["name"] if ds else None
+            binding["columns"] = db.loads(ds["columns"]) if ds else None
+            binding["rowCount"] = ds["row_count"] if ds else None
 
 
 def _decorate_tests(tests: list[dict], conn: sqlite3.Connection) -> None:
@@ -124,11 +133,12 @@ def _guard_folder_delete(folder_id: int, conn: sqlite3.Connection) -> None:
 
 
 def _guard_api_delete(api_id: int, conn: sqlite3.Connection) -> None:
-    used = [
-        f"业务流程“{flow['name']}”（#{flow['id']}）"
-        for flow in list_objs(conn, FLOWS)
-        if any(step.get("apiId") == api_id for step in flow["steps"])
-    ]
+    used = []
+    for flow in list_objs(conn, FLOWS):
+        where = [label for key, label in (("initSteps", "初始化段"), ("steps", "步骤"))
+                 if any(step.get("apiId") == api_id for step in flow[key])]
+        if where:
+            used.append(f"业务流程“{flow['name']}”（#{flow['id']}）的{'和'.join(where)}")
     if used:
         raise conflict("该接口正被业务流程引用，不能删除。请先从这些流程中移除它", used)
 
@@ -177,7 +187,9 @@ APIS = Resource(
         Field("method", "method"),
         Field("path", "path"),
         Field("headers", "headers", json=True),
+        Field("bodyType", "body_type"),
         Field("body", "body"),
+        Field("form", "form", json=True),
         Field("expectStatus", "expect_status"),
         Field("expectBodyContains", "expect_body_contains"),
         Field("extracts", "extracts", json=True),
@@ -190,7 +202,15 @@ APIS = Resource(
 FLOWS = Resource(
     name="flows",
     label="业务流程",
-    fields=(Field("name", "name"), Field("note", "note"), Field("steps", "steps", json=True)),
+    fields=(
+        Field("name", "name"),
+        Field("note", "note"),
+        Field("datasets", "datasets", json=True),
+        Field("variables", "variables", json=True),
+        Field("initSteps", "init_steps", json=True),
+        Field("reinitSec", "reinit_sec"),
+        Field("steps", "steps", json=True),
+    ),
     validate=validators.validate_flow,
     decorate=_decorate_flows,
     guard_delete=_guard_flow_delete,

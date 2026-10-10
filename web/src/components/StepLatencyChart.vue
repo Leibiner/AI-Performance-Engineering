@@ -40,7 +40,10 @@ let observer: ResizeObserver | undefined
 
 function buildOption(): ChartOption {
   const multiFlow = new Set(props.steps.map((s) => s.flowKey)).size > 1
-  const categories = props.steps.map((s) => (multiFlow ? `${s.flowName} / ${s.stepName}` : s.stepName))
+  const categories = props.steps.map((s) => {
+    const name = s.phase === 'init' ? `初始化 · ${s.stepName}` : s.stepName
+    return multiFlow ? `${s.flowName} / ${name}` : name
+  })
   return {
     animationDuration: 300,
     textStyle: { fontFamily: 'system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif' },

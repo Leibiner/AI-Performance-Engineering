@@ -67,12 +67,25 @@ export interface FolderInput {
 export type Folder = FolderInput & Stamped
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-export type ExtractFrom = 'json' | 'regex' | 'header'
+export type ExtractFrom = 'json' | 'regex' | 'header' | 'cookie'
 
 export interface Extract {
   var: string
   from: ExtractFrom
   expr: string
+}
+
+/** raw 发 body；form 发 x-www-form-urlencoded；multipart 发 multipart/form-data（引擎换掉合并后的 Content-Type） */
+export type BodyType = 'raw' | 'form' | 'multipart'
+export type FormItemType = 'text' | 'file'
+
+export interface ApiFormItem {
+  name: string
+  type: FormItemType
+  /** file 项为 "" */
+  value: string
+  /** text 项为 null */
+  fileId: number | null
 }
 
 export interface ApiDefInput {
@@ -82,7 +95,12 @@ export interface ApiDefInput {
   method: HttpMethod
   path: string
   headers: Record<string, string>
+  /** 契约允许省略（按 raw），页面总是带上：PUT 是整体替换 */
+  bodyType: BodyType
+  /** bodyType 不是 raw 时保留但不发送 */
   body: string | null
+  /** bodyType 为 raw 时保留但不发送；form 时不能有 file 项 */
+  form: ApiFormItem[]
   expectStatus: number
   expectBodyContains: string | null
   extracts: Extract[]
@@ -100,15 +118,100 @@ export interface FlowStep extends FlowStepInput {
   method?: HttpMethod
   path?: string
 }
+
+/** sequential 所有 VU 共用游标；random 每次迭代随机；perVu 每个 VU 固定一行 */
+export type DatasetPick = 'sequential' | 'random' | 'perVu'
+/** pick 为 random 时只能是 recycle；stop 时数据用完判 invalid */
+export type DatasetOnExhausted = 'recycle' | 'stop'
+
+export interface FlowDatasetInput {
+  datasetId: number
+  pick: DatasetPick
+  onExhausted: DatasetOnExhausted
+}
+/** GET 返回时额外带的只读字段 */
+export interface FlowDataset extends FlowDatasetInput {
+  datasetName?: string
+  columns?: string[]
+  rowCount?: number
+}
+
+export interface FlowVariable {
+  name: string
+  value: string
+}
+
+/** datasets / variables / initSteps 契约允许省略（按 []），页面总是带上：PUT 是整体替换 */
 export interface FlowInput {
   name: string
   note: string
+  datasets: FlowDatasetInput[]
+  variables: FlowVariable[]
+  initSteps: FlowStepInput[]
+  /** 正数或 null；initSteps 为空时必须是 null */
+  reinitSec: number | null
   steps: FlowStepInput[]
 }
 export interface Flow extends Stamped {
   name: string
   note: string
+  datasets: FlowDataset[]
+  variables: FlowVariable[]
+  initSteps: FlowStep[]
+  reinitSec: number | null
   steps: FlowStep[]
+}
+
+export interface DatasetSource {
+  /** 用 csv 文本保存时为 null */
+  fileName: string | null
+  encoding: 'utf-8' | 'utf-8-sig' | 'gb18030' | string
+  delimiter: string
+}
+
+export interface Dataset extends Stamped {
+  name: string
+  note: string
+  columns: string[]
+  rowCount: number
+  sha256: string
+  source: DatasetSource
+  usedBy: { flowId: number; flowName: string }[]
+}
+export interface DatasetDetail extends Dataset {
+  /** 前 100 行，顺序同 columns */
+  previewRows: string[][]
+}
+
+/** csv 和 contentBase64 恰好给一个 */
+export type DatasetData = { csv: string } | { contentBase64: string; fileName: string }
+
+/** POST 必须带数据；PUT 不带数据表示数据不变 */
+export type DatasetInput = { name: string; note: string } & (DatasetData | { csv?: never; contentBase64?: never })
+
+export interface DatasetPreview {
+  columns: string[]
+  rowCount: number
+  previewRows: string[][]
+  source: DatasetSource
+}
+
+export interface FileAsset extends Stamped {
+  /** multipart 里的 filename */
+  name: string
+  contentType: string
+  size: number
+  sha256: string
+  note: string
+  usedBy: { apiId: number; apiName: string }[]
+}
+export interface FileAssetInput {
+  name: string
+  /** 省略或为空时后端按扩展名推断 */
+  contentType?: string
+  note: string
+  /** POST 必填；PUT 省略表示内容不变 */
+  contentBase64?: string
 }
 
 export type ProfileType = 'smoke' | 'average' | 'stress' | 'spike' | 'soak' | 'breakpoint'
@@ -272,32 +375,80 @@ export type ArtifactName =
   | 'dashboard.html'
   | 'k6.log'
 
+export type PlanFormItem =
+  | { name: string; type: 'text'; value: string; fileId?: null }
+  | { name: string; type: 'file'; fileKey: string }
+
 export interface PlanStep {
   key: string
   name: string
   method: HttpMethod
   path: string
   headers: Record<string, string>
+  /** 旧的快照没有，按 raw */
+  bodyType?: BodyType
   body: string | null
+  form?: PlanFormItem[]
   expectStatus: number
   expectBodyContains: string | null
   extracts: Extract[]
   thinkTimeMs: number
 }
+export interface PlanFlowDataset {
+  key: string
+  pick: DatasetPick
+  onExhausted: DatasetOnExhausted
+  stride: number
+  offset: number
+}
 export interface PlanFlow {
   key: string
   name: string
   weight: number
+  datasets?: PlanFlowDataset[]
+  variables?: FlowVariable[]
+  reinitSec?: number | null
+  initSteps?: PlanStep[]
   steps: PlanStep[]
+}
+export interface PlanDataset {
+  key: string
+  id: number
+  name: string
+  columns: string[]
+  rowCount: number
+  sha256: string
+  file: string
+}
+export interface PlanFile {
+  key: string
+  id: number
+  name: string
+  contentType: string
+  size: number
+  sha256: string
+  file: string
 }
 export interface Plan {
   schemaVersion: number
   runId: string
   test: { id: number; name: string }
-  env: { id: number; name: string; type?: EnvType; baseUrl: string; headers: Record<string, string> }
+  env: {
+    id: number
+    name: string
+    type?: EnvType
+    baseUrl: string
+    headers: Record<string, string>
+    /** 旧的快照没有 */
+    variables?: Record<string, string>
+  }
   profile: { id: number; name: string; type: ProfileType; model: LoadModel; config: ProfileConfig }
+  // 以下三项旧的快照没有
+  datasets?: PlanDataset[]
+  files?: PlanFile[]
   flows: PlanFlow[]
   slo: Slo
+  debug?: { vars: Record<string, string>; bodyLimit: number }
 }
 
 export type ThresholdKind = 'slo' | 'validity'
@@ -315,6 +466,8 @@ export interface Threshold {
  * 没有样本时是 null 而不是 0：整个运行没有发出任何请求时，时间类字段和 errorRate、checksRate 为 null。
  */
 export interface OverallMetrics {
+  /** main：带初始化段时只算 steps 的请求（reqs、rps、avg…max、errorRate）。旧的记录没有，按 all */
+  scope?: 'all' | 'main'
   reqs: number
   rps: number
   iterations: number
@@ -333,11 +486,15 @@ export interface OverallMetrics {
 }
 
 /** 某个步骤一次请求都没发出时，count 为 0，其余数值字段为 null。 */
+export type StepPhase = 'init' | 'main'
+
 export interface StepMetrics {
   flowKey: string
   flowName: string
   stepKey: string
   stepName: string
+  /** 旧的记录没有，按 main */
+  phase?: StepPhase
   /** 这一步发出的 HTTP 请求数；被自动跟随的重定向每一跳各算一次 */
   count: number
   avg: number | null
@@ -414,11 +571,19 @@ export interface Overview {
 export type DebugStepStatus = 'passed' | 'failed' | 'skipped' | 'error'
 
 /** 这一步实际发出的请求（变量已替换、请求头已和被测环境合并） */
+export type DebugFormItem =
+  | { name: string; type: 'text'; value: string }
+  | { name: string; type: 'file'; fileName: string; contentType: string; size: number }
+
 export interface DebugRequestInfo {
   method: string
   url: string
   headers: Record<string, string>
+  bodyType: BodyType
+  /** form 时是编码后的字符串；multipart 时为 null */
   body: string | null
+  /** raw 时为 null */
+  form: DebugFormItem[] | null
 }
 
 export interface DebugResponseInfo {
@@ -465,6 +630,7 @@ export interface DebugExtracted {
 export interface DebugStep {
   key: string
   name: string
+  phase: StepPhase
   status: DebugStepStatus
   /** skipped / error 时为 null */
   request: DebugRequestInfo | null
@@ -483,11 +649,15 @@ export interface DebugInput {
   envId: number
   /** 被测环境类型为 prod 时必须为 true */
   confirmProd?: boolean
-  /** 初始变量 */
+  /** 只用于调试单个接口：覆盖环境变量初始值的当前值 */
   vars?: Record<string, string>
   /** 一份接口定义，不要求已保存 */
   api?: ApiDefInput
+  /** 只用于调试单个接口：同一次迭代里先按顺序执行的已保存接口，最多 5 个 */
+  beforeApiIds?: number[]
   flowId?: number
+  /** 数据集 id → 行号（从 0 开始） */
+  rows?: Record<string, number>
 }
 
 export interface DebugSource {

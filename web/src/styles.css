@@ -180,6 +180,9 @@ body {
 .muted {
   color: var(--ink-muted);
 }
+a.el-button {
+  text-decoration: none;
+}
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;
