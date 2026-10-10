@@ -1,9 +1,16 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useDebugContext } from '../../composables/useDebugContext'
 import EnvPicker from './EnvPicker.vue'
 import VariablesTable from './VariablesTable.vue'
 
 const ctx = useDebugContext()
+const initial = computed({
+  get: () => ctx.initialVars.value,
+  set: (v: Record<string, string>) => {
+    if (ctx.environment.value) ctx.setInitialVars(ctx.environment.value.id, v)
+  },
+})
 </script>
 
 <template>
@@ -22,7 +29,7 @@ const ctx = useDebugContext()
         </el-button>
       </template>
       <div class="debug-env-vars-title">{{ ctx.environment.value.name }}</div>
-      <VariablesTable :env-id="ctx.environment.value.id" :initial="ctx.initialVars.value" />
+      <VariablesTable v-model:initial="initial" :env-id="ctx.environment.value.id" confirm-delete />
     </el-popover>
     <router-link class="debug-env-link" to="/environments">管理</router-link>
   </div>

@@ -54,6 +54,53 @@ watch(
 )
 const environments = ref<Environment[]>([])
 const loaded = ref(false)
+/** 环境 id → 等待保存初始值的定时器 */
+const initialTimers: Record<number, number> = {}
+const INITIAL_SAVE_DELAY_MS = 600
+
+/**
+ * 改某个环境的初始值（存在被测环境上，所有人共享，正式运行用的就是它）：本地立即生效，停顿一会儿后保存。
+ * 保存成功不回填返回值：保存期间可能还在输入，回填会吞掉这些改动；失败时重新加载，回到库里的样子
+ */
+function setInitialVars(id: number, variables: Values): void {
+  if (!environments.value.some((e) => e.id === id)) return
+  environments.value = environments.value.map((e) => (e.id === id ? { ...e, variables } : e))
+  window.clearTimeout(initialTimers[id])
+  initialTimers[id] = window.setTimeout(() => {
+    delete initialTimers[id]
+    void saveInitial(id)
+  }, INITIAL_SAVE_DELAY_MS)
+}
+async function saveInitial(id: number): Promise<void> {
+  const env = environments.value.find((e) => e.id === id)
+  if (!env) return
+  try {
+    await environmentsApi.update(id, env)
+  } catch (e) {
+    showError(e, '保存环境变量失败')
+    try {
+      environments.value = await environmentsApi.list()
+    } catch {
+      // 加载失败时保留本地的样子，下次打开页面会重新加载
+    }
+  }
+}
+// 关掉标签页时还有没保存的初始值：立即开始保存，并让浏览器先确认，给保存留出时间
+window.addEventListener('beforeunload', (e) => {
+  if (!Object.keys(initialTimers).length) return
+  void flushEnvironmentEdits()
+  e.preventDefault()
+})
+
+/** 把还没保存的初始值存下来。重新加载环境列表、切换页面之前调用，否则加载回来的旧值会盖掉它们 */
+export async function flushEnvironmentEdits(): Promise<void> {
+  for (const key of Object.keys(initialTimers)) {
+    const id = Number(key)
+    window.clearTimeout(initialTimers[id])
+    delete initialTimers[id]
+    await saveInitial(id)
+  }
+}
 /** 本次会话里已经确认过"向生产环境发送"的被测环境 id */
 const confirmedProd = ref<Set<number>>(new Set())
 
@@ -126,6 +173,7 @@ export function useDebugContext() {
   }
 
   async function loadEnvironments(): Promise<void> {
+    await flushEnvironmentEdits()
     try {
       environments.value = await environmentsApi.list()
       loaded.value = true
@@ -170,7 +218,7 @@ export function useDebugContext() {
   }
 
   return {
-    envId, vars, overrides, varCount, initialVars, currentOf, setCurrent, clearCurrent, applyExtracted,
+    envId, vars, overrides, varCount, initialVars, setInitialVars, currentOf, setCurrent, clearCurrent, applyExtracted,
     environments, environment, loaded, loadEnvironments, blocker, ensureProdConfirmed,
   }
 }

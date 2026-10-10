@@ -214,7 +214,7 @@ async function save(): Promise<void> {
           />
         </el-form-item>
         <el-form-item label="环境变量">
-          <VariablesTable v-model:initial="form.variables" :env-id="editingId" edit-initial />
+          <VariablesTable v-model:initial="form.variables" :env-id="editingId" />
         </el-form-item>
 
         <fieldset class="limit-group" :class="{ 'is-prod': isProd }">

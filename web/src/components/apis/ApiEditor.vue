@@ -46,6 +46,13 @@ const props = defineProps<{
 const emit = defineEmits<{ save: []; duplicate: []; delete: [] }>()
 
 const ctx = useDebugContext()
+/** 变量表里改初始值：立即保存到当前调试环境上 */
+const envInitial = computed({
+  get: () => ctx.initialVars.value,
+  set: (v: Record<string, string>) => {
+    if (ctx.environment.value) ctx.setInitialVars(ctx.environment.value.id, v)
+  },
+})
 const index = useApiIndex()
 const dataRows = useDebugRows()
 const { files } = useFileList()
@@ -457,7 +464,7 @@ async function copyCurl(): Promise<void> {
 
       <el-tab-pane name="vars">
         <template #label>环境变量<span v-if="ctx.varCount.value" class="tab-count">{{ ctx.varCount.value }}</span></template>
-        <VariablesTable v-if="ctx.environment.value" :env-id="ctx.environment.value.id" :initial="ctx.initialVars.value" />
+        <VariablesTable v-if="ctx.environment.value" v-model:initial="envInitial" :env-id="ctx.environment.value.id" confirm-delete />
         <span v-else class="muted">未选择环境</span>
       </el-tab-pane>
     </el-tabs>

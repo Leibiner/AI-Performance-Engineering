@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import { flushEnvironmentEdits } from './composables/useDebugContext'
 
 // history 模式：依赖后端（以及 Vite 开发服务器）在找不到文件时回退到 index.html。
 const routes: RouteRecordRaw[] = [
@@ -36,6 +37,9 @@ export const router = createRouter({
   history: createWebHistory(),
   routes,
 })
+
+// 变量表里改的初始值停顿后才保存；换页面之前先存下来，免得新页面加载到旧值
+router.beforeEach(() => flushEnvironmentEdits())
 
 router.afterEach((to) => {
   const title = typeof to.meta.title === 'string' ? to.meta.title : ''
