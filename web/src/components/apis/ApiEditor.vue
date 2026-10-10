@@ -2,7 +2,9 @@
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CopyDocument, Delete, DocumentCopy, Plus, Position, RefreshLeft } from '@element-plus/icons-vue'
-import type { ApiDef, ExtractFrom } from '../../api'
+import type { ApiDef, ApiUsage, ExtractFrom } from '../../api'
+import { useRouter } from 'vue-router'
+import { stepPositions } from '../../utils/dependencies'
 import { useApiIndex } from '../../composables/useApiIndex'
 import { useDebug } from '../../composables/useDebug'
 import { useDebugContext } from '../../composables/useDebugContext'
@@ -40,12 +42,15 @@ const props = defineProps<{
   /** 已保存接口的自动保存状态 */
   saveStatus: 'saving' | 'saved' | 'error' | null
   saveError: string
+  /** 引用了这个接口的业务流程 */
+  usedBy: ApiUsage[]
   folderOptions: FolderOption[]
   producers: Record<string, string[]>
 }>()
 const emit = defineEmits<{ save: []; duplicate: []; delete: [] }>()
 
 const ctx = useDebugContext()
+const router = useRouter()
 /** 变量表里改初始值：立即保存到当前调试环境上 */
 const envInitial = computed({
   get: () => ctx.initialVars.value,
@@ -298,6 +303,17 @@ async function copyCurl(): Promise<void> {
       </el-tooltip>
       <span v-else-if="saveStatus === 'saving'" class="save-state">保存中</span>
       <span v-else-if="saveStatus === 'saved' && !dirty" class="save-state">已保存</span>
+      <el-popover v-if="usedBy.length" placement="bottom-start" :width="340" trigger="hover">
+        <template #reference>
+          <span class="used-by">被 {{ usedBy.length }} 个流程使用</span>
+        </template>
+        <ul class="used-by-list">
+          <li v-for="u in usedBy" :key="u.flowId">
+            <a class="dep-link" @click="router.push({ path: '/flows', query: { edit: String(u.flowId) } })">{{ u.flowName }}</a>
+            <span class="muted">{{ stepPositions(u) }}</span>
+          </li>
+        </ul>
+      </el-popover>
       <div class="editor-actions">
         <el-button text :icon="DocumentCopy" @click="copyCurl">复制为 cURL</el-button>
         <el-button v-if="!isNew" text :icon="CopyDocument" @click="emit('duplicate')">复制接口</el-button>
@@ -535,6 +551,22 @@ async function copyCurl(): Promise<void> {
 .folder-select {
   width: 200px;
   flex-shrink: 0;
+}
+.used-by {
+  flex-shrink: 0;
+  color: var(--el-color-primary);
+  font-size: 12px;
+  cursor: default;
+}
+.used-by-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  line-height: 1.9;
+}
+.used-by-list .muted {
+  margin-left: 8px;
+  font-size: 12px;
 }
 .save-state {
   flex-shrink: 0;

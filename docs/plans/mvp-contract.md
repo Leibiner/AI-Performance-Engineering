@@ -140,6 +140,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   - `header`：`expr` 是响应头名称，不区分大小写
   - `cookie`（2026-10-10 加入）：`expr` 是 Cookie 名称。先找这次响应（最后一跳）设置的 Cookie，没有再在这个流程正在用的 Cookie 罐里找：先按这次请求的地址，再按重定向后的最终地址
   - 取到的值是对象或数组时存成 JSON 字符串；取不到（含 `null`）算提取失败
+- `usedBy`（2026-10-10 加入，只读，`PUT` 时忽略）：引用了这个接口的业务流程，`[{ "flowId": 1, "flowName": "访问首页", "initSteps": [], "steps": [1], "onlyThisApi": true }]`。`initSteps` / `steps` 是它在初始化段 / 每次迭代里是第几步（从 1 开始）；`onlyThisApi` 表示这个流程的步骤全是这个接口，删掉它流程就空了。接口被引用时删除返回 409（见下文"业务流程"）
 
 **业务流程 `/api/flows`**
 
@@ -163,7 +164,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   - `onExhausted`：`recycle`（循环使用）或 `stop`（停止测试，判 `invalid`）。`pick` 为 `random` 时只能是 `recycle`。`sequential` 下"用完"指行都取过一遍；`perVu` 下"用完"指 VU 数超过行数
   - 同一流程绑定的多个数据集，列名不能重复
 - `variables`（2026-10-10 加入，省略时为 `[]`）：**流程变量**，每次迭代开始时（取完数据集的行之后、初始化段之前）按顺序求值一次，`value` 里可以引用环境变量、数据集的列、前面的流程变量和动态变量。用途：同一次迭代里多个步骤共用一个生成的值（例如订单号）。`name` 符合变量名规则、不能重复、不能和绑定的数据集的列重名
-- `GET` 返回时 `steps` 和 `initSteps` 的每项额外带 `apiName`、`method`、`path`；`datasets` 的每项额外带 `datasetName`、`columns`、`rowCount`（都是只读的展示字段，`PUT` 时忽略）
+- `GET` 返回时 `steps` 和 `initSteps` 的每项额外带 `apiName`、`method`、`path`；`datasets` 的每项额外带 `datasetName`、`columns`、`rowCount`；另带 `usedBy`：引用了这个流程的测试 `[{ "testId": 1, "testName": "百度首页冒烟", "onlyThisFlow": true }]`，`onlyThisFlow` 表示测试里只有这一个流程（都是只读的展示字段，`PUT` 时忽略）
 - 接口被流程引用（`steps` 或 `initSteps`）时不能删除（409）；数据集被流程绑定时不能删除（409）
 
 **变量**（2026-10-10 整理，ADR-006）

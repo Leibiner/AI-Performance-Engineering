@@ -106,7 +106,17 @@ export interface ApiDefInput {
   extracts: Extract[]
   note: string
 }
-export type ApiDef = ApiDefInput & Stamped
+/** 引用了这个接口的业务流程（GET 时的只读字段） */
+export interface ApiUsage {
+  flowId: number
+  flowName: string
+  /** 在初始化段 / 每次迭代里是第几步，从 1 开始 */
+  initSteps: number[]
+  steps: number[]
+  /** 流程的步骤全是这个接口：删掉它流程就空了 */
+  onlyThisApi: boolean
+}
+export type ApiDef = ApiDefInput & Stamped & { usedBy?: ApiUsage[] }
 
 export interface FlowStepInput {
   apiId: number
@@ -152,6 +162,13 @@ export interface FlowInput {
   reinitSec: number | null
   steps: FlowStepInput[]
 }
+/** 引用了这个流程的测试（GET 时的只读字段） */
+export interface FlowUsage {
+  testId: number
+  testName: string
+  /** 测试里只有这一个流程：删掉流程测试就空了 */
+  onlyThisFlow: boolean
+}
 export interface Flow extends Stamped {
   name: string
   note: string
@@ -160,6 +177,7 @@ export interface Flow extends Stamped {
   initSteps: FlowStep[]
   reinitSec: number | null
   steps: FlowStep[]
+  usedBy?: FlowUsage[]
 }
 
 export interface DatasetSource {

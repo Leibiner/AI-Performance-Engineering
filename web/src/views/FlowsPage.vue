@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { ArrowDown, ArrowUp, Delete, Plus, VideoPlay } from '@element-plus/icons-vue'
 import {
@@ -16,6 +17,7 @@ import {
 import { useDatasetList } from '../composables/useDatasetList'
 import { useDebugContext } from '../composables/useDebugContext'
 import { useResourceList } from '../composables/useResourceList'
+import { showFlowInUse } from '../utils/dependencies'
 import { showError } from '../utils/feedback'
 import { folderPath } from '../utils/folders'
 import { EXHAUSTED_OPTIONS, INIT_SEGMENT_TITLE, MAIN_SEGMENT_TITLE, PICK_LABELS, PICK_OPTIONS } from '../utils/test-data'
@@ -29,6 +31,32 @@ import FlowDebugDialog from '../components/debug/FlowDebugDialog.vue'
 import FlowStepList, { type ApiGroup, type StepRow } from '../components/flows/FlowStepList.vue'
 
 const { items, loading, load, remove } = useResourceList(flowsApi, '业务流程')
+const route = useRoute()
+const router = useRouter()
+
+// 从别的页面点过来（/flows?edit=3）：列表加载完后直接打开这个流程的编辑框
+watch(items, (list) => {
+  const id = Number(route.query.edit)
+  const flow = Number.isInteger(id) ? list.find((f) => f.id === id) : undefined
+  if (!flow) return
+  void router.replace({ query: {} })
+  openEdit(flow)
+})
+
+/** 被测试引用时不去试删除：列出这些测试和处理顺序 */
+async function del(row: Flow): Promise<void> {
+  try {
+    const fresh = await flowsApi.get(row.id)
+    if (fresh.usedBy?.length) {
+      showFlowInUse(router, fresh.name, fresh.usedBy)
+      return
+    }
+  } catch (e) {
+    showError(e, '删除失败')
+    return
+  }
+  await remove(row)
+}
 const ctx = useDebugContext()
 const { datasets, refresh: refreshDatasets } = useDatasetList()
 
@@ -298,6 +326,16 @@ const datasetTitle = (row: Flow) =>
               数据集 {{ (row as Flow).datasets.length }}
             </el-tag>
             <el-tag
+              v-if="(row as Flow).usedBy?.length"
+              size="small"
+              effect="plain"
+              class="flow-tag"
+              :title="(row as Flow).usedBy!.map((t) => t.testName).join('、')"
+              disable-transitions
+            >
+              测试 {{ (row as Flow).usedBy!.length }}
+            </el-tag>
+            <el-tag
               v-if="(row as Flow).variables?.length"
               size="small"
               type="info"
@@ -343,7 +381,7 @@ const datasetTitle = (row: Flow) =>
           <template #default="{ row }">
             <el-button link type="primary" :icon="VideoPlay" @click="openDebug(row as Flow)">试跑</el-button>
             <el-button link type="primary" @click="openEdit(row as Flow)">编辑</el-button>
-            <el-button link type="danger" @click="remove(row as Flow)">删除</el-button>
+            <el-button link type="danger" @click="del(row as Flow)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

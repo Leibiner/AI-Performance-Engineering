@@ -107,6 +107,31 @@ def _decorate_flows(flows: list[dict], conn: sqlite3.Connection) -> None:
             binding["datasetName"] = ds["name"] if ds else None
             binding["columns"] = db.loads(ds["columns"]) if ds else None
             binding["rowCount"] = ds["row_count"] if ds else None
+    # 反向引用：哪些测试用了这个流程。onlyThisFlow 表示测试里只有这一个流程（删掉流程测试就空了）
+    tests = [(r["id"], r["name"], [item.get("flowId") for item in db.loads(r["flows"]) or []])
+             for r in conn.execute("SELECT id, name, flows FROM tests ORDER BY id")]
+    for flow in flows:
+        flow["usedBy"] = [
+            {"testId": tid, "testName": tname, "onlyThisFlow": all(fid == flow["id"] for fid in fids)}
+            for tid, tname, fids in tests if flow["id"] in fids
+        ]
+
+
+def _decorate_apis(apis: list[dict], conn: sqlite3.Connection) -> None:
+    """反向引用：哪些业务流程用了这个接口、在第几步。onlyThisApi 表示流程里的步骤全是这个接口（删掉它流程就空了）。"""
+    flows = [(r["id"], r["name"], db.loads(r["init_steps"]) or [], db.loads(r["steps"]) or [])
+             for r in conn.execute("SELECT id, name, init_steps, steps FROM flows ORDER BY id")]
+    for api in apis:
+        used = []
+        for fid, fname, init_steps, steps in flows:
+            init_at = [i for i, step in enumerate(init_steps, 1) if step.get("apiId") == api["id"]]
+            main_at = [i for i, step in enumerate(steps, 1) if step.get("apiId") == api["id"]]
+            if init_at or main_at:
+                used.append({
+                    "flowId": fid, "flowName": fname, "initSteps": init_at, "steps": main_at,
+                    "onlyThisApi": all(step.get("apiId") == api["id"] for step in init_steps + steps),
+                })
+        api["usedBy"] = used
 
 
 def _decorate_tests(tests: list[dict], conn: sqlite3.Connection) -> None:
@@ -196,6 +221,7 @@ APIS = Resource(
         Field("note", "note"),
     ),
     validate=validators.validate_api,
+    decorate=_decorate_apis,
     guard_delete=_guard_api_delete,
 )
 

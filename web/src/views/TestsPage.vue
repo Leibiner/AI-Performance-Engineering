@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { Delete, Plus, VideoPlay } from '@element-plus/icons-vue'
 import { flowsApi, testsApi, type Flow, type TestDef, type TestInput } from '../api'
@@ -12,6 +13,17 @@ import RunDialog from '../components/RunDialog.vue'
 import VerdictTag from '../components/VerdictTag.vue'
 
 const { items, loading, load, remove } = useResourceList(testsApi, '测试')
+const route = useRoute()
+const router = useRouter()
+
+// 从别的页面点过来（/tests?edit=2）：列表加载完后直接打开这个测试的编辑框
+watch(items, (list) => {
+  const id = Number(route.query.edit)
+  const test = Number.isInteger(id) ? list.find((t) => t.id === id) : undefined
+  if (!test) return
+  void router.replace({ query: {} })
+  openEdit(test)
+})
 
 const flows = ref<Flow[]>([])
 async function loadFlows(): Promise<void> {

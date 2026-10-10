@@ -292,3 +292,29 @@ a.el-button {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* 删除被引用的定义时列出依赖链（utils/dependencies.ts，渲染在消息框里，所以是全局样式） */
+.el-message-box.dep-box {
+  width: min(600px, 92vw);
+  max-width: none;
+}
+.dep-dialog ul {
+  margin: 8px 0;
+  padding-left: 18px;
+  line-height: 1.9;
+}
+.dep-sub {
+  font-size: 12px;
+}
+.dep-order {
+  margin-top: 8px;
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+}
+.dep-link {
+  color: var(--el-color-primary);
+  cursor: pointer;
+}
+.dep-link:hover {
+  text-decoration: underline;
+}
