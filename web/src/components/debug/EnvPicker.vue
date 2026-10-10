@@ -3,7 +3,7 @@ import { computed, onMounted } from 'vue'
 import { useDebugContext } from '../../composables/useDebugContext'
 import EnvTypeTag from '../EnvTypeTag.vue'
 
-withDefaults(defineProps<{ seamless?: boolean }>(), { seamless: false })
+withDefaults(defineProps<{ seamless?: boolean; manage?: boolean }>(), { seamless: false, manage: false })
 
 const { envId, environments, environment, loadEnvironments } = useDebugContext()
 // 每次挂载都重新拉一次：从被测环境页改完回来，列表就是新的
@@ -45,6 +45,9 @@ const width = computed(() => {
         <span class="env-option-url">{{ e.baseUrl }}</span>
       </span>
     </el-option>
+    <template v-if="manage" #footer>
+      <router-link class="env-manage" to="/environments">管理被测环境</router-link>
+    </template>
   </el-select>
 </template>
 
@@ -65,13 +68,20 @@ const width = computed(() => {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12.5px;
 }
+/* 嵌在组合控件里：边框由外层画 */
 .env-picker.is-seamless :deep(.el-select__wrapper) {
+  min-height: 30px;
   border-radius: 0;
-  background: #f4f5f7;
+  background: transparent;
   box-shadow: none !important;
 }
-.env-picker.is-seamless :deep(.el-select__wrapper.is-focused) {
-  background: #eef1f5;
+.env-manage {
+  color: var(--el-color-primary);
+  font-size: 13px;
+  text-decoration: none;
+}
+.env-manage:hover {
+  text-decoration: underline;
 }
 .env-option {
   display: flex;

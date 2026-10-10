@@ -20,12 +20,12 @@ import { METHODS, METHOD_COLOR } from '../../utils/method'
 import { joinPath, splitPath } from '../../utils/query'
 import { apiRefs } from '../../utils/var-sources'
 import { isDynamicRef, isValidVarName } from '../../utils/vars'
+import EnvTypeTag from '../EnvTypeTag.vue'
 import KeyValueEditor from '../KeyValueEditor.vue'
 import VarInput from '../VarInput.vue'
 import DebugErrorView from '../debug/DebugErrorView.vue'
 import DebugStepPanel from '../debug/DebugStepPanel.vue'
 import VariablesTable from '../debug/VariablesTable.vue'
-import EnvPicker from '../debug/EnvPicker.vue'
 import BodyEditor from './BodyEditor.vue'
 import BrokenTag from '../refs/BrokenTag.vue'
 import UsageTag from '../refs/UsageTag.vue'
@@ -319,7 +319,13 @@ async function copyCurl(): Promise<void> {
         </el-option>
       </el-select>
       <div class="url-box">
-        <EnvPicker seamless class="url-env" />
+        <span class="url-env" :title="ctx.environment.value?.name">
+          <template v-if="ctx.environment.value">
+            <EnvTypeTag :type="ctx.environment.value.type" />
+            <span class="url-env-text"><bdi>{{ ctx.environment.value.baseUrl }}</bdi></span>
+          </template>
+          <span v-else class="muted">未选择环境</span>
+        </span>
         <VarInput
           v-model="form.path"
           class="url-path"
@@ -594,9 +600,26 @@ async function copyCurl(): Promise<void> {
   box-shadow: 0 0 0 1px var(--el-color-primary) inset;
 }
 .url-env {
+  display: flex;
   flex: 0 1 auto;
-  min-width: 130px;
+  align-items: center;
+  gap: 8px;
+  min-width: 96px;
+  padding: 0 12px;
   border-right: 1px solid var(--hairline);
+  background: #f4f5f7;
+  font-size: 13px;
+  white-space: nowrap;
+}
+/* 放不下时省略开头，留下主机和端口 */
+.url-env-text {
+  overflow: hidden;
+  direction: rtl;
+  text-align: left;
+  text-overflow: ellipsis;
+  color: var(--el-text-color-regular);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
 }
 .url-path {
   flex: 1 0 200px;

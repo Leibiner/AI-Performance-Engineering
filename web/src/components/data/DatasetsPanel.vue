@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Plus } from '@element-plus/icons-vue'
 import { datasetsApi, type Dataset } from '../../api'
 import { useResourceList } from '../../composables/useResourceList'
 import UsageTag from '../refs/UsageTag.vue'
@@ -34,6 +33,8 @@ function openEdit(row: Dataset): void {
   editingId.value = row.id
   dialogVisible.value = true
 }
+
+defineExpose({ openCreate })
 </script>
 
 <template>
@@ -85,9 +86,6 @@ function openEdit(row: Dataset): void {
       </template>
     </el-table-column>
     <el-table-column label="操作" width="180" fixed="right">
-      <template #header>
-        <el-button link type="primary" :icon="Plus" @click="openCreate">新建</el-button>
-      </template>
       <template #default="{ row }">
         <el-button link type="primary" @click="openEdit(row as Dataset)">编辑</el-button>
         <el-button link type="primary" tag="a" :href="datasetsApi.csvUrl((row as Dataset).id, true)">下载</el-button>

@@ -23,7 +23,9 @@ import { folderPath } from '../utils/folders'
 import { EXHAUSTED_OPTIONS, INIT_SEGMENT_TITLE, MAIN_SEGMENT_TITLE, PICK_LABELS, PICK_OPTIONS } from '../utils/test-data'
 import { analyzeFlow, refResolver, type FlowVarModel } from '../utils/var-sources'
 import { isValidVarName } from '../utils/vars'
+import PageHeader from '../components/PageHeader.vue'
 import VarInput from '../components/VarInput.vue'
+import DebugEnvBar from '../components/debug/DebugEnvBar.vue'
 import EnvPicker from '../components/debug/EnvPicker.vue'
 import FlowDebugDialog from '../components/debug/FlowDebugDialog.vue'
 import FlowStepList, { type ApiGroup, type StepRow } from '../components/flows/FlowStepList.vue'
@@ -297,6 +299,11 @@ const datasetTitle = (row: Flow) =>
 
 <template>
   <div class="page">
+    <PageHeader>
+      <template #context><DebugEnvBar /></template>
+      <el-button type="primary" :icon="Plus" @click="openCreate">新建流程</el-button>
+    </PageHeader>
+
     <div class="panel">
       <el-table v-loading="loading" :data="items" empty-text="暂无数据">
         <el-table-column label="名称" min-width="180">
@@ -358,9 +365,6 @@ const datasetTitle = (row: Flow) =>
         </el-table-column>
         <el-table-column prop="note" label="备注" min-width="160" show-overflow-tooltip />
         <el-table-column label="操作" width="190" fixed="right">
-          <template #header>
-            <el-button link type="primary" :icon="Plus" @click="openCreate">新建</el-button>
-          </template>
           <template #default="{ row }">
             <el-button link type="primary" :icon="VideoPlay" @click="openDebug(row as Flow)">试跑</el-button>
             <el-button link type="primary" @click="openEdit(row as Flow)">编辑</el-button>

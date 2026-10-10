@@ -10,6 +10,7 @@ import { fromRows, toRows, type KvRow } from '../utils/kv'
 import EnvTypeTag from '../components/EnvTypeTag.vue'
 import KeyValueEditor from '../components/KeyValueEditor.vue'
 import VariablesTable from '../components/debug/VariablesTable.vue'
+import PageHeader from '../components/PageHeader.vue'
 
 const { items, loading, load, remove } = useResourceList(environmentsApi, '被测环境')
 
@@ -141,6 +142,10 @@ async function save(): Promise<void> {
 
 <template>
   <div class="page">
+    <PageHeader>
+      <el-button type="primary" :icon="Plus" @click="openCreate">新建被测环境</el-button>
+    </PageHeader>
+
     <div class="panel">
       <el-table v-loading="loading" :data="items" empty-text="暂无数据">
         <el-table-column prop="name" label="名称" min-width="160" />
@@ -172,9 +177,6 @@ async function save(): Promise<void> {
         </el-table-column>
         <el-table-column prop="note" label="备注" min-width="180" show-overflow-tooltip />
         <el-table-column label="操作" width="130" fixed="right">
-          <template #header>
-            <el-button link type="primary" :icon="Plus" @click="openCreate">新建</el-button>
-          </template>
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row as Environment)">编辑</el-button>
             <el-button link type="danger" @click="remove(row as Environment)">删除</el-button>

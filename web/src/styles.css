@@ -156,6 +156,12 @@ body {
   align-items: center;
   gap: 8px;
 }
+.page-context {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
 
 .panel {
   margin-bottom: 16px;
