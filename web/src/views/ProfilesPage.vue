@@ -27,7 +27,7 @@ import {
 } from '../utils/profile'
 import PageHeader from '../components/PageHeader.vue'
 
-const { items, loading, load, remove } = useResourceList(profilesApi, '负载配置')
+const { items, loading, load, remove } = useResourceList(profilesApi, '施压配置')
 
 interface StageRow {
   target: number | undefined
@@ -197,7 +197,7 @@ async function save(): Promise<void> {
 <template>
   <div class="page">
     <PageHeader>
-      <el-button type="primary" :icon="Plus" @click="openCreate">新建负载配置</el-button>
+      <el-button type="primary" :icon="Plus" @click="openCreate">新建施压配置</el-button>
     </PageHeader>
 
     <div class="panel">
@@ -231,7 +231,7 @@ async function save(): Promise<void> {
 
     <el-dialog
       v-model="dialogVisible"
-      :title="editingId === null ? '新建负载配置' : '编辑负载配置'"
+      :title="editingId === null ? '新建施压配置' : '编辑施压配置'"
       width="760px"
       top="6vh"
       :close-on-click-modal="false"

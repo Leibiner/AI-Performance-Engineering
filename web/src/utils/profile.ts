@@ -74,7 +74,7 @@ export function shapeOf(model: LoadModel, config: ProfileConfig): ProfileShape {
   return 'stages' in config ? 'ramping' : 'rate'
 }
 
-/** 负载配置的需求，用于在发起运行前和被测环境的安全上限对照。 */
+/** 施压配置的需求，用于在发起运行前和被测环境的安全上限对照。 */
 export interface ProfileDemand {
   /** 并发：vus 或 preAllocatedVus */
   vus: number
@@ -110,7 +110,7 @@ export function demandOf(model: LoadModel, config: ProfileConfig): ProfileDemand
   }
 }
 
-/** 一句话描述负载配置的内容，用于表格和选择框。 */
+/** 一句话描述施压配置的内容，用于表格和选择框。 */
 export function describeConfig(model: LoadModel, config: ProfileConfig): string {
   switch (shapeOf(model, config)) {
     case 'iterations': {

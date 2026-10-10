@@ -71,6 +71,11 @@ body {
   background: rgba(64, 158, 255, 0.22);
   box-shadow: inset 3px 0 0 var(--el-color-primary);
 }
+.layout-menu .el-menu-item-group__title {
+  padding: 14px 0 6px var(--el-menu-base-level-padding);
+  color: #7c8699;
+  font-size: 12px;
+}
 
 .aside-footer {
   padding: 12px 16px 16px;

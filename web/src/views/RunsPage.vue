@@ -53,7 +53,7 @@ async function load(silent = false): Promise<void> {
     total.value = result.total ?? 0
   } catch (e) {
     if (seq !== loadSeq) return
-    if (!silent) showError(e, '加载运行列表失败')
+    if (!silent) showError(e, '加载运行记录失败')
   } finally {
     if (seq === loadSeq) loading.value = false
   }
@@ -148,7 +148,7 @@ onBeforeUnmount(() => {
             <router-link class="run-link num" :to="`/runs/${row.runId}`">{{ formatTime(row.startedAt) }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column label="测试 / 负载配置" min-width="190">
+        <el-table-column label="测试 / 施压配置" min-width="190">
           <template #default="{ row }">
             <div class="cell-main" :title="row.testName">{{ row.testName }}</div>
             <div class="cell-sub" :title="row.profileName">{{ row.profileName }}</div>

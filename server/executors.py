@@ -1,4 +1,4 @@
-"""执行机（契约 §3.3）：安装了本项目、实际运行 k6 的机器。目前只有运行后端的这一台。
+"""施压机（契约 §3.3）：安装了本项目、实际运行 k6 的机器。目前只有运行后端的这一台。
 
 库里只存 name、kind、note；主机名、内存、负载这些每次请求时实时采集，只用标准库
 （/proc、os、platform、shutil、socket），取不到的给 null。
@@ -128,7 +128,7 @@ def _describe(row, running: str | None) -> dict:
 # ---------- 给运行用的 ----------
 
 def find(conn, executor_id: int | None):
-    """按 id 找执行机；id 为 None 时返回本机执行机。找不到返回 None。"""
+    """按 id 找施压机；id 为 None 时返回本机施压机。找不到返回 None。"""
     if executor_id is None:
         return conn.execute("SELECT * FROM executors WHERE kind = 'local' ORDER BY id LIMIT 1").fetchone()
     return conn.execute("SELECT * FROM executors WHERE id = ?", (executor_id,)).fetchone()
@@ -165,7 +165,7 @@ class Sampler:
         try:
             self._thread.start()
         except Exception:  # noqa: BLE001
-            log.exception("启动执行机采样线程失败（不影响运行）")
+            log.exception("启动施压机采样线程失败（不影响运行）")
 
     def _run(self) -> None:
         try:
@@ -190,7 +190,7 @@ class Sampler:
                 if got:
                     self._samples += 1
         except Exception:  # noqa: BLE001
-            log.exception("执行机采样出错，已停止采样（不影响运行）")
+            log.exception("施压机采样出错，已停止采样（不影响运行）")
 
     def stop(self) -> None:
         """让采样线程结束。最多等 2 秒，不会卡住调用方。"""
@@ -226,17 +226,17 @@ def record_block(executor_id: Any, executor_name: Any, samples: dict | None) -> 
 
 # ---------- 路由 ----------
 
-router = APIRouter(prefix="/api/executors", tags=["执行机"])
+router = APIRouter(prefix="/api/executors", tags=["施压机"])
 
 
 def _require(conn, executor_id: int):
     row = find(conn, executor_id)
     if row is None:
-        raise not_found(f"执行机 #{executor_id} 不存在")
+        raise not_found(f"施压机 #{executor_id} 不存在")
     return row
 
 
-@router.get("", summary="执行机列表")
+@router.get("", summary="施压机列表")
 def list_executors():
     with db.connect() as conn:
         rows = conn.execute("SELECT * FROM executors ORDER BY id").fetchall()
@@ -244,7 +244,7 @@ def list_executors():
     return [_describe(row, running) for row in rows]
 
 
-@router.get("/{executor_id}", summary="执行机详情")
+@router.get("/{executor_id}", summary="施压机详情")
 def get_executor(executor_id: int):
     with db.connect() as conn:
         row = _require(conn, executor_id)
@@ -252,7 +252,7 @@ def get_executor(executor_id: int):
     return _describe(row, running)
 
 
-@router.put("/{executor_id}", summary="修改执行机的名称和备注")
+@router.put("/{executor_id}", summary="修改施压机的名称和备注")
 def update_executor(executor_id: int, payload: Any = Body(...)):
     if not isinstance(payload, dict):
         raise bad_request("请求体必须是 JSON 对象")

@@ -100,6 +100,8 @@
 ## 4. 前端
 
 | 主题 | 内容 | 日期 |
+| 侧栏分组 | `router` 模式的 `el-menu` 里把 `el-menu-item` 包进 `el-menu-item-group`（`title` 是组名），导航和当前页高亮照常；组内菜单项和组外的"概览"左对齐，不额外缩进。深色侧栏要自己给 `.el-menu-item-group__title` 配色和上下间距 | 2026-10-10 |
+| 类型检查用 `--noEmit` | `vue-tsc -b`（build 模式）会在 `web/` 下留下 `tsconfig.tsbuildinfo`；构建脚本用的是 `vue-tsc --noEmit`，单独做类型检查也用它 | 2026-10-10 |
 |---|---|---|
 | 技术栈 | Vue 3 + TypeScript + Vite + Element Plus + vue-router + ECharts。没有状态管理库，没有 axios（用 fetch 封装） | 2026-09-30 |
 | TypeScript 版本 | npm 上 `typescript@latest` 已是 7.0.2，与 `vue-tsc 3.3.11` 不兼容（启动即报 `ERR_PACKAGE_PATH_NOT_EXPORTED`）。固定为 `typescript@~6.0.3` | 2026-09-30 |
@@ -147,6 +149,8 @@
 ## 5. 流程与协作
 
 | 主题 | 内容 | 日期 |
+| 名称要有出处 | 用户要求页面和菜单名称按实际作用定，"查看行业内的 top 或者与我确定，不能自己胡诌"。做法：两个 subagent 分别查国内（阿里云 PTS、华为云 CodeArts PerfTest、腾讯云压测、MeterSphere、Apifox、Apipost）和国外（Grafana k6、OpenText、BlazeMeter、Gatling、NeoLoad、Postman、Azure 等）的官方文档，列出"概念 → 各家用词 → 出处"；主会话亲自打开关键引文核对后出方案，用户确认后才改。依据存在 `docs/research/ui-naming.md` | 2026-10-10 |
+| 核对网页出处 | subagent 的转述会走样：腾讯云施压配置页的正文写的是"压测机""压测资源"，"施压机"只出现在报告页签上，要亲自打开原文。只看 HTTP 状态码不够：阿里云帮助中心对不存在的路径也返回 200（页面标题是"404错误页"），要看标题或正文。MeterSphere 文档站证书校验不通过，WebFetch 读不了，用 `curl -k` | 2026-10-10 |
 |---|---|---|
 | 多 agent 并行 | 先写好三方接口契约（`docs/plans/mvp-contract.md`），再让执行引擎、后端、前端三个 agent 并行开发，各自只改自己的目录，由主会话统一联调和提交 | 2026-09-30 |
 | 契约的单一修改者 | 三个 agent 中只允许执行引擎一方修改契约（它负责用真实 k6 验证），其余两方把问题写在汇报里，由主会话统一更新 | 2026-09-30 |

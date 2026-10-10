@@ -27,7 +27,7 @@ log = logging.getLogger("uvicorn.error")
 
 SCHEMA_VERSION = 5
 
-LOCAL_EXECUTOR_NAME = "本机执行机"
+LOCAL_EXECUTOR_NAME = "本机施压机"
 
 
 def _environments_ddl(table: str = "environments") -> str:
@@ -233,7 +233,7 @@ def guess_env_type(base_url: Any) -> str:
 
 
 def _ensure_local_executor(conn: sqlite3.Connection) -> int:
-    """保证有一条本机执行机，返回它的 id。"""
+    """保证有一条本机施压机，返回它的 id。"""
     row = conn.execute("SELECT id FROM executors WHERE kind = 'local' ORDER BY id LIMIT 1").fetchone()
     if row:
         return int(row[0])
@@ -278,7 +278,7 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
         conn.execute("DELETE FROM sqlite_sequence WHERE name = 'environments'")
         conn.execute("INSERT INTO sqlite_sequence (name, seq) VALUES ('environments', ?)", (seq[0],))
 
-    # 2) executors：新表 + 本机执行机
+    # 2) executors：新表 + 本机施压机
     conn.execute(_EXECUTORS_DDL)
     executor_id = _ensure_local_executor(conn)
     executor_name = conn.execute("SELECT name FROM executors WHERE id = ?", (executor_id,)).fetchone()[0]

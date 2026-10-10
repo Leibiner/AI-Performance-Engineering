@@ -17,17 +17,32 @@ import { systemApi, type SystemInfo } from './api'
 const route = useRoute()
 const activeMenu = computed(() => (typeof route.meta.menu === 'string' ? route.meta.menu : route.path))
 
-const menu = [
-  { index: '/', label: '概览', icon: Odometer },
-  // 执行机和被测环境相邻：一个是发起压测的机器，一个是被压的系统
-  { index: '/executors', label: '执行机', icon: Cpu },
-  { index: '/environments', label: '被测环境', icon: Monitor },
-  { index: '/apis', label: '接口', icon: Link },
-  { index: '/flows', label: '业务流程', icon: Connection },
-  { index: '/data', label: '测试数据', icon: Files },
-  { index: '/profiles', label: '负载配置', icon: DataLine },
-  { index: '/tests', label: '测试', icon: Tickets },
-  { index: '/runs', label: '运行', icon: List },
+// 名称和分组按业内用法定，依据见 docs/research/ui-naming.md；改名先补依据
+const home = { index: '/', label: '概览', icon: Odometer }
+const menuGroups = [
+  {
+    title: '业务',
+    items: [
+      { index: '/apis', label: '接口', icon: Link },
+      { index: '/flows', label: '业务流程', icon: Connection },
+      { index: '/data', label: '测试数据', icon: Files },
+    ],
+  },
+  {
+    title: '压测',
+    items: [
+      { index: '/profiles', label: '施压配置', icon: DataLine },
+      { index: '/tests', label: '测试', icon: Tickets },
+      { index: '/runs', label: '运行记录', icon: List },
+    ],
+  },
+  {
+    title: '资源',
+    items: [
+      { index: '/environments', label: '被测环境', icon: Monitor },
+      { index: '/executors', label: '施压机', icon: Cpu },
+    ],
+  },
 ]
 
 // 侧栏底部显示 k6 版本；有运行在进行时给出全局入口。后端不可用时静默。
@@ -57,10 +72,16 @@ onBeforeUnmount(() => window.clearInterval(timer))
         <div class="brand-sub">k6 · MVP</div>
       </div>
       <el-menu :default-active="activeMenu" router class="layout-menu">
-        <el-menu-item v-for="item in menu" :key="item.index" :index="item.index">
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span>{{ item.label }}</span>
+        <el-menu-item :index="home.index">
+          <el-icon><component :is="home.icon" /></el-icon>
+          <span>{{ home.label }}</span>
         </el-menu-item>
+        <el-menu-item-group v-for="group in menuGroups" :key="group.title" :title="group.title">
+          <el-menu-item v-for="item in group.items" :key="item.index" :index="item.index">
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span>{{ item.label }}</span>
+          </el-menu-item>
+        </el-menu-item-group>
       </el-menu>
       <div class="aside-footer">
         <router-link v-if="system?.runningRunId" class="running-pill" :to="`/runs/${system.runningRunId}`">

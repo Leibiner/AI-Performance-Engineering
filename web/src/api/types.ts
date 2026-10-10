@@ -7,7 +7,7 @@ export interface Stamped {
   updatedAt: string
 }
 
-/** 执行机：安装了本项目、实际运行 k6 的机器。目前只有本机一台，没有新增和删除。 */
+/** 施压机：安装了本项目、实际运行 k6 的机器。目前只有本机一台，没有新增和删除。 */
 export interface Executor extends Stamped {
   name: string
   kind: 'local' | string
@@ -49,7 +49,7 @@ export interface EnvironmentInput {
   headers: Record<string, string>
   /** 环境变量的初始值：运行和调试开始时的变量。旧数据可能没有 */
   variables?: Record<string, string>
-  // 安全上限：保护被测环境的护栏，不是负载配置。null 表示不限制；type 为 prod 时三项必填
+  // 安全上限：保护被测环境的护栏，不是施压配置。null 表示不限制；type 为 prod 时三项必填
   maxVus: number | null
   /** 每秒迭代数 */
   maxRate: number | null
@@ -371,7 +371,7 @@ export interface RunStartInput {
   testId: number
   profileId: number
   envId: number
-  /** 可省略，默认用本机执行机 */
+  /** 可省略，默认用本机施压机 */
   executorId?: number
   /** 被测环境类型为 prod 时必须为 true，否则预检不通过 */
   confirmProd?: boolean
@@ -555,7 +555,7 @@ export interface RunRecord {
   test?: { id: number; name: string }
   profile?: { id: number; name: string; model: LoadModel }
   env?: { id: number; name: string; type?: EnvType; baseUrl: string }
-  /** 运行期间对执行机的采样。只作为信息展示，不参与判定。旧的运行记录没有 */
+  /** 运行期间对施压机的采样。只作为信息展示，不参与判定。旧的运行记录没有 */
   executor?: RecordExecutor | null
 }
 

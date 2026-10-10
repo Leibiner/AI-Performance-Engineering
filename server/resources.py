@@ -1,4 +1,4 @@
-"""定义类资源（环境、文件夹、接口、业务流程、负载配置、测试）的统一增删改查（契约 §3.1）。
+"""定义类资源（环境、文件夹、接口、业务流程、施压配置、测试）的统一增删改查（契约 §3.1）。
 
 数据集和文件的写入方式不同（上传、解析），在 datasets.py、files.py。
 """
@@ -213,7 +213,7 @@ FLOWS = Resource(
 
 PROFILES = Resource(
     name="profiles",
-    label="负载配置",
+    label="施压配置",
     fields=(
         Field("name", "name"),
         Field("type", "type"),

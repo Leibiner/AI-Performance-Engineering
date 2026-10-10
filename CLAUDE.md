@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 当前状态
 
-**MVP 已完成并可运行**（2026-09-30）：一个以 k6 为执行引擎的性能测试管理控制台。在页面上维护接口、业务流程、负载配置、验收标准、环境，从页面发起和停止压测，查看判定和指标，结果自动存档。
+**MVP 已完成并可运行**（2026-09-30）：一个以 k6 为执行引擎的性能测试管理控制台。在页面上维护接口、业务流程、施压配置、验收标准、环境，从页面发起和停止压测，查看判定和指标，结果自动存档。
 
 - 已实现和未实现的能力以 `docs/ARCHITECTURE.md` §1.1 状态表为准；MVP 相对 Phase 0 原设计的出入见 §1.2。
 - 基线对比、趋势、CI、Prometheus / Grafana、Trace、Evidence Bundle、分布式、任何 AI 功能都**还没有实现**，不要当成已有能力来用或引用。
@@ -71,7 +71,7 @@ K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --por
 | `server/` | 后端：Python 3.12 + FastAPI + 标准库 `sqlite3`。增删改查、预检、启动和停止 k6、最终判定、存档、托管前端 | `server/main.py` |
 | `web/` | 前端：Vue 3 + TypeScript + Vite + Element Plus + ECharts，10 个页面 | `web/src/router.ts` |
 
-一次运行的路径：页面 `POST /api/runs` → 后端预检 → 把测试、流程、接口、负载配置、环境展开成 `results/<runId>/plan.json`（同时作为快照存库）→ 启动 k6 子进程 → `handleSummary` 写 `run-record.json` → 后端按退出码和 `k6Verdict` 得出最终判定，补全 Run Record 后存库。完整的数据流见 `ARCHITECTURE.md` §3.4。`results/<runId>/` 里的产物只有 5 个：`plan.json`、`run-record.json`、`k6-summary.json`、`dashboard.html`、`k6.log`，产物接口只认这 5 个文件名（`server/runs.py` 的 `ARTIFACTS`）；用到数据集或文件时，旁边另有 `datasets/`、`files/` 两个目录，是 k6 的输入（行数据不进 plan 和快照），不经产物接口提供。
+一次运行的路径：页面 `POST /api/runs` → 后端预检 → 把测试、流程、接口、施压配置、环境展开成 `results/<runId>/plan.json`（同时作为快照存库）→ 启动 k6 子进程 → `handleSummary` 写 `run-record.json` → 后端按退出码和 `k6Verdict` 得出最终判定，补全 Run Record 后存库。完整的数据流见 `ARCHITECTURE.md` §3.4。`results/<runId>/` 里的产物只有 5 个：`plan.json`、`run-record.json`、`k6-summary.json`、`dashboard.html`、`k6.log`，产物接口只认这 5 个文件名（`server/runs.py` 的 `ARTIFACTS`）；用到数据集或文件时，旁边另有 `datasets/`、`files/` 两个目录，是 k6 的输入（行数据不进 plan 和快照），不经产物接口提供。
 
 调试的路径：页面 `POST /api/debug`（一份接口定义或一个流程 id + 被测环境）→ 后端组装成 1 并发、1 次迭代、带 `debug` 段的 plan，写到 `results/_debug/<debugId>/` → 以调试模式启动 k6（`--no-thresholds --quiet --log-format=json --console-output=…`，不开仪表盘）→ 引擎迭代结束时把逐步记录 `console.log` 成一行 JSON → 后端解析后同步返回，目录读完即删（`server/debug.py`）。调试不留运行记录，和运行互斥（`server/runs.py` 的 `claim_debug_slot`）。约定见契约 §3.5、§4 `debug`、§5.1。
 
@@ -83,9 +83,9 @@ K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --por
 - 业务流程是数据，不是代码：新增流程不加文件。`runner.js` 只导出一个执行函数 `runFlow`，用 scenario 名（= 流程的 `key`）找回对应的流程。一次迭代：取数据集的行 → 求流程变量 → 需要时执行初始化段（每个 VU 一次，输出跨迭代保留）→ 执行每次迭代的步骤；每一步按 `{{变量}}` 替换 → 发请求 → check → 提取变量 → 等待 `thinkTimeMs`。变量按求值顺序分层、后写的覆盖先写的（环境 → 数据集 → 流程变量 → 初始化段输出 → 步骤提取），某一步的 check 没通过时本次迭代剩下的步骤不再执行（`perf/core/interp.js`）。
 - 数据在 `data/app.db`（SQLite 单文件）。种子数据在 `server/seed.py`，只在全新的库里写一次；改了种子要删库才会生效。
 - **改表结构要写迁移，不能删库**：库里有用户的真实数据。表结构版本记在 `PRAGMA user_version`，在 `server/db.py` 里把 `SCHEMA_VERSION` 加 1 并加一段迁移（备份 → 一个事务内迁移 → 写版本号），先在库的拷贝上验证，再重启正式服务。迁移前会自动备份到 `data/app.db.v<旧版本>.bak`（已存在则不覆盖）；迁移后不能直接回退旧代码，要先用备份还原。
-- **两种"环境"不要混用**：**执行机**（`executors`）是安装了本项目、实际运行 k6 的机器，目前只有本机一台，不能新增和删除；**被测环境**（`environments`）是被压测的目标，有类型 `dev / test / staging / prod`。被测环境上的 `maxVus`、`maxRate`、`maxDurationSec` 是**安全上限**（只在预检时用来拒绝超限的运行），不是负载配置。
+- **两种"环境"不要混用**：**施压机**（`executors`）是安装了本项目、实际运行 k6 的机器，目前只有本机一台，不能新增和删除；**被测环境**（`environments`）是被压测的目标，有类型 `dev / test / staging / prod`。被测环境上的 `maxVus`、`maxRate`、`maxDurationSec` 是**安全上限**（只在预检时用来拒绝超限的运行），不是施压配置。
 
-**负载配置的 4 种形态。** `config` 的字段组合必须恰好是下表之一（保存和预检都用 `server/validators.py` 的 `config_shape_problem` 校验）；`perf/core/compose.js` 把每个流程编译成一个同名的 k6 scenario，多个流程按权重拆分并发或到达率：
+**施压配置的 4 种形态。** `config` 的字段组合必须恰好是下表之一（保存和预检都用 `server/validators.py` 的 `config_shape_problem` 校验）；`perf/core/compose.js` 把每个流程编译成一个同名的 k6 scenario，多个流程按权重拆分并发或到达率：
 
 | `model` | `config` 必须恰好是这些字段 | 编译成的 k6 executor |
 |---|---|---|
@@ -110,11 +110,11 @@ K6_BIN=server/dev/fake-k6.sh uv run uvicorn server.main:app --host 0.0.0.0 --por
 
 **不要让浏览器连 k6 实时仪表盘。** 只要有浏览器连着 `:5665`，k6 跑完后就不会退出，也不写 summary，运行会一直停在"运行中"。仪表盘只监听 `127.0.0.1`，页面上不嵌入也不链接它；运行中的进度来自 `k6.log`，结束后的图表用导出的 `dashboard.html`。
 
-**业务与负载分开。** 接口和流程的数据模型里不能出现并发、到达率、时长；负载配置里不能出现地址和业务逻辑；它们只在后端组装 plan 时相遇。负载配置必须显式声明 `model: open | closed`。"Scenario" 只指 k6 Scenario，它是 `compose.js` 的编译产物，不手写、不在页面上维护。
+**业务与负载分开。** 接口和流程的数据模型里不能出现并发、到达率、时长；施压配置里不能出现地址和业务逻辑；它们只在后端组装 plan 时相遇。施压配置必须显式声明 `model: open | closed`。"Scenario" 只指 k6 Scenario，它是 `compose.js` 的编译产物，不手写、不在页面上维护。
 
 **`perf/core/` 不认识任何具体的被测系统**，只依赖 k6 内置模块，不 import `k6/x/*` 或 `k6/experimental/*`。`testid` tag 只在后端启动 k6 时设置一次。ID 类数据和页面上的中文名称不进 tag。
 
-**执行机采样只展示，不参与判定。** 运行期间后端每秒采样本机 CPU 和内存，写进 Run Record 的 `executor`。是否在执行机过载时判 `invalid`、阈值多少，未决，不要自行加进判定。
+**施压机采样只展示，不参与判定。** 运行期间后端每秒采样本机 CPU 和内存，写进 Run Record 的 `executor`。是否在施压机过载时判 `invalid`、阈值多少，未决，不要自行加进判定。
 
 **同一时间只允许 1 个运行；后端只能单进程。** 正在运行的 k6 进程句柄在内存里。向 k6 发信号只能发一次 SIGINT：第二次会让它强制退出且不写 summary；点停止后 30 秒还没退出才强杀。重启后端会中止正在进行的运行：关闭时向 k6 发 SIGINT，启动时把库里仍是"运行中"的记录标为 `error` 并停掉遗留的 k6 进程（`server/runs.py` 的 `shutdown` / `recover_stale`），所以有运行在进行时不要重启服务。
 
@@ -168,7 +168,7 @@ docs/research/         L3 研究记录与来源；只作为依据，不随实现
 - **自有目标系统**：百度只能冒烟，不能产生性能结论。需要一个可以自由加压的目标（本机没有 Docker 和 sudo，QuickPizza 没有采用）。
 - **登录与权限**：现在没有，服务监听 `0.0.0.0`，被测环境的类型和安全上限可以在页面上修改。多人使用或暴露到不可信网络之前必须先做（ADR-005）。
 - **目标地址白名单**：非生产类型的被测环境可以不设上限，而任何合法地址都能建成被测环境。要不要限制"只有白名单里的域名才允许不设上限"。
-- **执行机过载是否判 `invalid`**：现在只展示采样结果。
+- **施压机过载是否判 `invalid`**：现在只展示采样结果。
 - **CI 的入口和平台**：没有命令行入口。是让 CI 调用后端接口，还是"plan 文件 + 命令行"（`ARCHITECTURE.md` §3.8）；平台未定。
 - **基线、历史、实验记录的存储形态**：放数据库，还是放 git 以保留审核（`ARCHITECTURE.md` §3.7）。
 - **流程的表达力**：数据集、每 VU 登录一次已按 ADR-006 用扩展数据模型解决；分支、循环、轮询仍未决（扩展数据模型，还是引入手写 JS 模块作为第二种流程类型，ADR-005）。

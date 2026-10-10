@@ -50,7 +50,7 @@ export const DYNAMIC_VARS: DynamicVar[] = [
   { name: '$isoTimestamp', meaning: '当前时间，ISO 8601 UTC', example: '{{$isoTimestamp}}' },
   {
     name: '$date',
-    meaning: '执行机本地时间按格式输出，默认 yyyy-MM-dd；括号里的全部内容都是格式，认 yyyy MM dd HH mm ss SSS',
+    meaning: '施压机本地时间按格式输出，默认 yyyy-MM-dd；括号里的全部内容都是格式，认 yyyy MM dd HH mm ss SSS',
     example: '{{$date(yyyyMMddHHmmss)}}',
   },
   { name: '$uuid', aliases: ['$guid', '$randomUUID'], meaning: '随机 UUID v4', example: '{{$uuid}}' },

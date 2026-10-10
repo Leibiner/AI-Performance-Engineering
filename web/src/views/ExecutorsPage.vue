@@ -10,7 +10,7 @@ const REFRESH_MS = 3000
 
 const items = ref<Executor[]>([])
 const loading = ref(false)
-/** 页面上这份数据的采集时间（执行机的硬件、负载等字段是每次请求时实时采集的） */
+/** 页面上这份数据的采集时间（施压机的硬件、负载等字段是每次请求时实时采集的） */
 const fetchedAt = ref<string | null>(null)
 
 let refreshTimer: number | undefined
@@ -23,7 +23,7 @@ async function load(silent = false): Promise<void> {
     items.value = await executorsApi.list()
     fetchedAt.value = new Date().toISOString()
   } catch (e) {
-    if (!silent) showError(e, '加载执行机失败')
+    if (!silent) showError(e, '加载施压机失败')
   } finally {
     loading.value = false
   }
@@ -93,7 +93,7 @@ async function save(): Promise<void> {
 <template>
   <div v-loading="loading" class="page">
     <div v-if="!loading && items.length === 0" class="panel">
-      <el-empty description="暂无执行机" />
+      <el-empty description="暂无施压机" />
     </div>
 
     <div v-for="x in items" :key="x.id" class="panel">
@@ -173,7 +173,7 @@ async function save(): Promise<void> {
       </el-descriptions>
     </div>
 
-    <el-dialog v-model="dialogVisible" title="编辑执行机" width="560px" :close-on-click-modal="false" destroy-on-close>
+    <el-dialog v-model="dialogVisible" title="编辑施压机" width="560px" :close-on-click-modal="false" destroy-on-close>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="80px">
         <el-form-item label="名称" prop="name">
           <el-input v-model="form.name" maxlength="100" />

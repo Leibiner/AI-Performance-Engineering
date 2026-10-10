@@ -173,7 +173,7 @@ def _fmt(value: Any) -> str:
 
 
 def _limit_problems(profile: dict, env: dict) -> list[str]:
-    """负载配置与被测环境的安全上限比较。上限为 null 表示不限制，跳过那一项。"""
+    """施压配置与被测环境的安全上限比较。上限为 null 表示不限制，跳过那一项。"""
     problems = []
     usage = profile_usage(profile)
     where = f"被测环境“{env['name']}”的安全上限"
@@ -230,7 +230,7 @@ def _exhaustion_problems(profile: dict, specs: list[FlowSpec]) -> list[str]:
             if b["pick"] == "perVu" and b["onExhausted"] == "stop" and is_num(total_vus) and total_vus > ds["rowCount"]:
                 problems.append(
                     f"业务流程“{spec.name}”绑定的数据集“{ds['name']}”取法为每个 VU 固定一行、用完时停止测试，"
-                    f"但负载配置的总 VU 数 {_fmt(total_vus)}（{vus_field}）超过了它的行数 {ds['rowCount']}"
+                    f"但施压配置的总 VU 数 {_fmt(total_vus)}（{vus_field}）超过了它的行数 {ds['rowCount']}"
                 )
 
     # 按顺序：只有固定迭代数形态事先知道迭代数。k 个流程共用一个数据集时，第 offset 个流程取第
@@ -271,21 +271,21 @@ def _exhaustion_problems(profile: dict, specs: list[FlowSpec]) -> list[str]:
 def _preflight(conn, test_id: int, profile_id: int, env_id: int, executor_id: int | None, confirm_prod: bool):
     """预检里不涉及“是否已有运行”和 k6 的部分。
 
-    通过时返回 (test, profile, env, 执行机, 展开的流程, 用到的文件)，否则抛 422。
+    通过时返回 (test, profile, env, 施压机, 展开的流程, 用到的文件)，否则抛 422。
     """
     details: list[str] = []
     test = get_obj(conn, TESTS, test_id)
     profile = get_obj(conn, PROFILES, profile_id)
     env = get_obj(conn, ENVIRONMENTS, env_id)
-    executor = executors.find(conn, executor_id)  # executor_id 为 None 时取本机执行机
+    executor = executors.find(conn, executor_id)  # executor_id 为 None 时取本机施压机
     if test is None:
         details.append(f"测试 #{test_id} 不存在")
     if profile is None:
-        details.append(f"负载配置 #{profile_id} 不存在")
+        details.append(f"施压配置 #{profile_id} 不存在")
     if env is None:
         details.append(f"被测环境 #{env_id} 不存在")
     if executor is None:
-        details.append("没有可用的执行机" if executor_id is None else f"执行机 #{executor_id} 不存在")
+        details.append("没有可用的施压机" if executor_id is None else f"施压机 #{executor_id} 不存在")
 
     specs: list[FlowSpec] = []
     complete: list[bool] = []
@@ -315,7 +315,7 @@ def _preflight(conn, test_id: int, profile_id: int, env_id: int, executor_id: in
     if profile is not None:
         shape_problem = config_shape_problem(profile["model"], profile["config"])
         if shape_problem:
-            details.append(f"负载配置“{profile['name']}”不属于支持的四种形态：{shape_problem}")
+            details.append(f"施压配置“{profile['name']}”不属于支持的四种形态：{shape_problem}")
         else:
             shape_ok = True
             if env is not None:
@@ -328,7 +328,7 @@ def _preflight(conn, test_id: int, profile_id: int, env_id: int, executor_id: in
                 value = profile["config"].get(key)
                 if is_num(value) and value < flow_count:
                     details.append(
-                        f"负载配置的{label} {key} = {_fmt(value)}，小于测试里的业务流程数量 {flow_count}，"
+                        f"施压配置的{label} {key} = {_fmt(value)}，小于测试里的业务流程数量 {flow_count}，"
                         "无法给每个流程至少分配 1"
                     )
 
@@ -492,7 +492,7 @@ def _finalize(
             "id": plan_env.get("id"), "name": plan_env.get("name"),
             "type": plan_env.get("type") or row["env_type"], "baseUrl": plan_env.get("baseUrl"),
         },
-        # 执行机在运行期间的资源占用：只作信息展示，不参与判定
+        # 施压机在运行期间的资源占用：只作信息展示，不参与判定
         "executor": executors.record_block(row["executor_id"], row["executor_name"], samples),
     })
     folder = run_dir(run_id)
@@ -521,7 +521,7 @@ def _wait(active: _Active) -> None:
         sampler = executors.Sampler()
         sampler.start()
     except Exception:  # noqa: BLE001
-        log.exception("运行 %s：启动执行机采样失败（不影响运行）", active.run_id)
+        log.exception("运行 %s：启动施压机采样失败（不影响运行）", active.run_id)
     exit_code = active.proc.wait()
     samples = None
     try:
@@ -529,7 +529,7 @@ def _wait(active: _Active) -> None:
             sampler.stop()
             samples = sampler.result()
     except Exception:  # noqa: BLE001
-        log.exception("运行 %s：读取执行机采样结果失败（不影响收尾）", active.run_id)
+        log.exception("运行 %s：读取施压机采样结果失败（不影响收尾）", active.run_id)
     try:
         _finalize(active.run_id, exit_code, reason=active.reason, samples=samples)
     except Exception:  # noqa: BLE001
@@ -634,9 +634,9 @@ def create_run(payload: Any = Body(...)):
         note = ""
     if not isinstance(note, str):
         problems.append("note（备注）必须是字符串")
-    executor_id = payload.get("executorId")  # 可省略，默认本机执行机
+    executor_id = payload.get("executorId")  # 可省略，默认本机施压机
     if executor_id is not None and not is_int(executor_id):
-        problems.append("executorId 必须是整数；省略时使用本机执行机")
+        problems.append("executorId 必须是整数；省略时使用本机施压机")
     confirm_prod = payload.get("confirmProd")
     if confirm_prod is not None and not isinstance(confirm_prod, bool):
         problems.append("confirmProd 必须是 true 或 false")

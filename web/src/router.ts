@@ -7,7 +7,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/executors',
     component: () => import('./views/ExecutorsPage.vue'),
-    meta: { title: '执行机', menu: '/executors' },
+    meta: { title: '施压机', menu: '/executors' },
   },
   {
     path: '/environments',
@@ -20,10 +20,10 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/profiles',
     component: () => import('./views/ProfilesPage.vue'),
-    meta: { title: '负载配置', menu: '/profiles' },
+    meta: { title: '施压配置', menu: '/profiles' },
   },
   { path: '/tests', component: () => import('./views/TestsPage.vue'), meta: { title: '测试', menu: '/tests' } },
-  { path: '/runs', component: () => import('./views/RunsPage.vue'), meta: { title: '运行', menu: '/runs' } },
+  { path: '/runs', component: () => import('./views/RunsPage.vue'), meta: { title: '运行记录', menu: '/runs' } },
   {
     path: '/runs/:runId',
     component: () => import('./views/RunDetailPage.vue'),

@@ -39,17 +39,19 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 | 页面上的名称 | 表 | 对应 `ARCHITECTURE.md` 的概念 |
 |---|---|---|
-| 执行机 | `executors` | Load Generator：安装了本项目、实际运行 k6 的机器 |
-| 被测环境 | `environments` | Environment：被测系统的某个环境（开发 / 测试 / 预发 / 生产），含安全上限 |
 | 接口 | `apis` | Service 中的一个请求 |
 | 业务流程 | `flows` | Flow（按顺序执行的接口步骤） |
 | 数据集 | `datasets` | Data：只读数据集（表头即变量名，绑定在业务流程上） |
 | 文件 | `files` | 接口请求体里引用的文件（multipart 上传） |
-| 负载配置 | `profiles` | Load Profile（显式 `model: open / closed`） |
+| 施压配置 | `profiles` | Load Profile（显式 `model: open / closed`） |
 | 测试 | `tests` | Test Definition（Flow Mix + SLO） |
-| 运行 | `runs` | Run + Run Record + Verdict |
+| 运行 | `runs` | Run + Run Record + Verdict（列表页叫"运行记录"） |
+| 被测环境 | `environments` | Environment：被测系统的某个环境（开发 / 测试 / 预发 / 生产），含安全上限 |
+| 施压机 | `executors` | Load Generator：安装了本项目、实际运行 k6 的机器 |
 
-业务（接口、流程）与负载（负载配置）仍然分开维护，只在发起运行时由后端组装成 plan，再由 `perf/core/compose.js` 生成 k6 的 scenarios 和 thresholds。
+页面上的名称在 2026-10-10 按业内用法定过一次：执行机改叫施压机，负载配置改叫施压配置，运行的列表页叫运行记录；表名、接口路径和字段名都不变。依据见 `docs/research/ui-naming.md`。ADR、提交记录和技术笔记里仍是旧名。
+
+业务（接口、流程）与负载（施压配置）仍然分开维护，只在发起运行时由后端组装成 plan，再由 `perf/core/compose.js` 生成 k6 的 scenarios 和 thresholds。
 
 ## 3. REST API
 
@@ -91,9 +93,9 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 - `headers`：公共请求头，每个请求都带；接口自己的同名请求头（名称不区分大小写）覆盖它
 - `variables`（2026-10-09 加入）：环境变量的**初始值**，变量名 → 字符串，变量名的规则见下文「变量」。运行时每次迭代开始、调试开始时都以它为初始变量，接口里用 `{{变量名}}` 引用；数据集的行、流程变量、提取到的同名变量会覆盖它（分层见下文「变量」）。运行不会回写它
 
-- 这里的"环境"指**被测环境**（被测系统部署在哪里），不是执行机（§3.3）。
+- 这里的"环境"指**被测环境**（被测系统部署在哪里），不是施压机（§3.3）。
 - `type`：`dev`（开发）、`test`（测试）、`staging`（预发）、`prod`（生产），必填。
-- `maxVus`、`maxRate`（每秒迭代数）、`maxDurationSec` 是**安全上限**：保护被测环境的护栏，不是负载配置。不管选哪个负载配置，超过上限就被预检拒绝。
+- `maxVus`、`maxRate`（每秒迭代数）、`maxDurationSec` 是**安全上限**：保护被测环境的护栏，不是施压配置。不管选哪个施压配置，超过上限就被预检拒绝。
   - 每项为正数或 `null`，`null` 表示不限制。
   - `type` 为 `prod` 时三项都必填（不能为 `null`）；其他类型可以留空。
 
@@ -194,7 +196,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 | `{{$timestamp}}` | 当前 Unix 时间，秒 |
 | `{{$timestampMs}}` | 当前 Unix 时间，毫秒 |
 | `{{$isoTimestamp}}` | 当前时间，ISO 8601 UTC，如 `2026-10-10T03:15:00.123Z` |
-| `{{$date}}`、`{{$date(格式)}}` | 执行机本地时间按格式输出，默认 `yyyy-MM-dd`；括号里的全部内容都是格式（可以有逗号），认 `yyyy` `MM` `dd` `HH` `mm` `ss` `SSS`，其余字符原样输出 |
+| `{{$date}}`、`{{$date(格式)}}` | 施压机本地时间按格式输出，默认 `yyyy-MM-dd`；括号里的全部内容都是格式（可以有逗号），认 `yyyy` `MM` `dd` `HH` `mm` `ss` `SSS`，其余字符原样输出 |
 | `{{$uuid}}`（别名 `{{$guid}}`、`{{$randomUUID}}`） | 随机 UUID v4 |
 | `{{$randomInt}}`、`{{$randomInt(最小,最大)}}` | 随机整数，闭区间，默认 0–1000；两个参数都必须是 ±(2^53−1) 以内的整数且最小不大于最大 |
 | `{{$randomString}}`、`{{$randomString(长度)}}` | 随机字母数字串，默认长度 8，最长 256 |
@@ -204,7 +206,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 - 参数写在括号里，用逗号分隔，参数里不能有花括号和括号；表里没写参数的不接受参数（`{{$uuid()}}` 这种空括号可以）。参数不对时和不认识的名称一样原样保留，正式运行和流程试跑的预检会拒绝。动态变量不进 tag，也不参与判定
 
-**负载配置 `/api/profiles`**
+**施压配置 `/api/profiles`**
 
 ```json
 {
@@ -238,13 +240,13 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 - `flows[].weight`：正数，后端不要求和为 1，组装 plan 时归一化
 - `slo` 各字段可为 `null`（表示不设该项）
 - `GET` 返回时每个 flow 额外带 `flowName`；另带 `lastRun: { runId, verdict, startedAt } | null`；另带 `brokenRefs`（§3.8）
-- 流程被测试引用时也可以删除，测试里的这一项变成失效引用（见上文「失效引用」）；测试、负载配置、环境有运行记录时可以删除（运行里存了快照）
+- 流程被测试引用时也可以删除，测试里的这一项变成失效引用（见上文「失效引用」）；测试、施压配置、环境有运行记录时可以删除（运行里存了快照）
 
 ### 3.2 运行 `/api/runs`
 
 | 方法与路径 | 说明 |
 |---|---|
-| `POST /api/runs` | 发起运行。body：`{ "testId": 1, "profileId": 1, "envId": 1, "executorId": 1, "confirmProd": false, "note": "" }`。`executorId` 可省略，默认用本机执行机。被测环境类型为 `prod` 时必须带 `"confirmProd": true`（只有布尔值 `true` 算确认；不是布尔值返回 400），否则预检不通过。成功返回 201 和运行对象（`status: "running"`） |
+| `POST /api/runs` | 发起运行。body：`{ "testId": 1, "profileId": 1, "envId": 1, "executorId": 1, "confirmProd": false, "note": "" }`。`executorId` 可省略，默认用本机施压机。被测环境类型为 `prod` 时必须带 `"confirmProd": true`（只有布尔值 `true` 算确认；不是布尔值返回 400），否则预检不通过。成功返回 201 和运行对象（`status: "running"`） |
 | `GET /api/runs?testId=&verdict=&status=&archived=&page=1&pageSize=20` | 列表，按开始时间倒序。返回 `{ "items": [...], "total": 123 }`，列表项不含 `snapshot` 和 `record` |
 | `GET /api/runs/:runId` | 详情，含 `snapshot`、`record`、`artifacts` |
 | `POST /api/runs/:runId/stop` | 停止正在进行的运行（向 k6 发 SIGINT）。不在运行中返回 409 |
@@ -260,7 +262,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   "testId": 1, "testName": "百度首页冒烟",
   "profileId": 1, "profileName": "冒烟",
   "envId": 1, "envName": "百度（仅冒烟）", "envType": "prod",
-  "executorId": 1, "executorName": "本机执行机",
+  "executorId": 1, "executorName": "本机施压机",
   "status": "running",
   "verdict": null,
   "startedAt": "2026-09-30T10:15:00.000Z", "endedAt": null,
@@ -288,10 +290,10 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 **预检**（`POST /api/runs` 时执行，不通过返回 422）：
 
-1. 测试、负载配置、环境都存在；测试至少有 1 个流程，每个流程至少有 1 个步骤；测试里的流程、流程里的步骤和数据集绑定都没有失效引用（引用的对象已被删除，见 §3.1「失效引用」），否则逐条指出是哪一项、怎么修
+1. 测试、施压配置、环境都存在；测试至少有 1 个流程，每个流程至少有 1 个步骤；测试里的流程、流程里的步骤和数据集绑定都没有失效引用（引用的对象已被删除，见 §3.1「失效引用」），否则逐条指出是哪一项、怎么修
 2. 环境的 `baseUrl` 是合法的 http / https 地址
-3. 负载配置不超过被测环境的安全上限（只检查不为 `null` 的项）：并发（`vus` 或 `preAllocatedVus`）≤ `maxVus`；到达率（`rate`、`startRate`、各 stage 的 `target`）≤ `maxRate`；总时长 ≤ `maxDurationSec`。被测环境类型为 `prod` 时，请求里必须带 `"confirmProd": true`
-4. 负载配置属于 §3.1 的四种形态之一
+3. 施压配置不超过被测环境的安全上限（只检查不为 `null` 的项）：并发（`vus` 或 `preAllocatedVus`）≤ `maxVus`；到达率（`rate`、`startRate`、各 stage 的 `target`）≤ `maxRate`；总时长 ≤ `maxDurationSec`。被测环境类型为 `prod` 时，请求里必须带 `"confirmProd": true`
+4. 施压配置属于 §3.1 的四种形态之一
 5. 流程数量不超过并发：closed 模型下 `vus`（以及固定迭代数形态的 `iterations`）不小于测试的流程数量；open 模型下 `preAllocatedVus` 不小于流程数量（每个流程至少要有 1 个 VU）
 6. 没有其他运行正在进行（否则 409）
 7. k6 可执行文件存在
@@ -302,15 +304,15 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
    - `{{$名称}}` 必须是 §3.1 动态变量表里的名称，参数符合表里的规则
    - 不通过时每个缺失的引用一条：`业务流程“下单”第 2 步「查订单」引用了 {{token}}，但没有来源：被测环境“测试”没有这个变量，数据集、流程变量和前面的步骤也不产出它`（初始化段的步骤写"初始化第 N 步"，流程变量写"流程变量 orderNo"）
 9. **数据集够用**（2026-10-10 加入）：绑定的数据集都存在、至少 1 行；同一流程绑定的数据集列名不重复，流程变量不和列重名。`onExhausted` 为 `stop` 时：
-   - `perVu`：负载配置的总 VU 数（`vus` 或 `preAllocatedVus`）不能超过行数
-   - `sequential`：负载配置是固定迭代数形态时，设这个流程按权重分到的迭代数为 n（和 §4 一样用最大余数法），按顺序共用这个数据集的流程有 k 个、它是其中第 offset 个（从 0 起，即 plan 里的 `offset`），它最多用到第 (n − 1) × k + offset 行（从 0 起），要求 (n − 1) × k + offset + 1 ≤ 行数。只检查 `stop` 的绑定：`recycle` 的不会触发数据用完。其他三种形态的迭代数事先不知道，不在预检里拦，运行中用完时按 §5 判 `invalid`
+   - `perVu`：施压配置的总 VU 数（`vus` 或 `preAllocatedVus`）不能超过行数
+   - `sequential`：施压配置是固定迭代数形态时，设这个流程按权重分到的迭代数为 n（和 §4 一样用最大余数法），按顺序共用这个数据集的流程有 k 个、它是其中第 offset 个（从 0 起，即 plan 里的 `offset`），它最多用到第 (n − 1) × k + offset 行（从 0 起），要求 (n − 1) × k + offset + 1 ≤ 行数。只检查 `stop` 的绑定：`recycle` 的不会触发数据用完。其他三种形态的迭代数事先不知道，不在预检里拦，运行中用完时按 §5 判 `invalid`
 10. **文件不超量**（2026-10-10 加入）：`multipart` 引用的文件都存在；（总 VU 数 + 2）× 用到的文件大小之和 ≤ 2 GiB（k6 每个 VU 各持有一份文件，见 `records/tech-notes.md` §2）
 
-测试、负载配置或环境不存在也算预检不通过，返回 422。
+测试、施压配置或环境不存在也算预检不通过，返回 422。
 
-### 3.3 执行机 `/api/executors`
+### 3.3 施压机 `/api/executors`
 
-执行机是安装了本项目、实际运行 k6 的机器。目前只有一台：运行后端服务的这台机器（`kind: "local"`），由后端在建库时自动创建。多台执行机属于分布式执行，尚未实现，所以没有新增和删除接口。
+施压机是安装了本项目、实际运行 k6 的机器。目前只有一台：运行后端服务的这台机器（`kind: "local"`），由后端在建库时自动创建。多台施压机属于分布式执行，尚未实现，所以没有新增和删除接口。
 
 | 方法与路径 | 说明 |
 |---|---|
@@ -320,7 +322,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 ```json
 {
-  "id": 1, "name": "本机执行机", "kind": "local", "note": "",
+  "id": 1, "name": "本机施压机", "kind": "local", "note": "",
   "host": "主机名", "ip": "192.168.0.136",
   "os": "Ubuntu 24.04.4 LTS", "arch": "x86_64",
   "cpuCores": 4, "memTotalMb": 15900, "memAvailableMb": 7000,
@@ -337,11 +339,11 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 - `status`：`idle | running`
 - 内存和磁盘按 1024 进制换算（MiB、GiB）
 
-**运行期间的执行机采样**：运行期间后端每秒采样一次本机 CPU 和内存占用，结束时写进最终 Run Record：
+**运行期间的施压机采样**：运行期间后端每秒采样一次本机 CPU 和内存占用，结束时写进最终 Run Record：
 
 ```json
 "executor": {
-  "id": 1, "name": "本机执行机", "host": "主机名", "cpuCores": 4, "memTotalMb": 15900,
+  "id": 1, "name": "本机施压机", "host": "主机名", "cpuCores": 4, "memTotalMb": 15900,
   "cpuAvgPct": 12.3, "cpuMaxPct": 41.0, "memMaxPct": 55.2, "samples": 9
 }
 ```
@@ -351,7 +353,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 - 目前只作为信息展示，**不参与判定**
 - plan.json 的 `env` 和最终 Run Record 的 `env` 都带 `type` 字段
 
-**旧运行**：加入执行机和环境类型之前的运行，库里的 `envType`、`executorId`、`executorName` 在迁移时已经补上，但它们的 `snapshot.env`、`record.env` 没有 `type`，`record` 里也没有 `executor`（存档不回改）。前端读这几处时要容忍不存在。
+**旧运行**：加入施压机和环境类型之前的运行，库里的 `envType`、`executorId`、`executorName` 在迁移时已经补上，但它们的 `snapshot.env`、`record.env` 没有 `type`，`record` 里也没有 `executor`（存档不回改）。前端读这几处时要容忍不存在。
 
 ### 3.4 其他
 
@@ -398,7 +400,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 | 项 | 运行 | 调试 |
 |---|---|---|
-| 负载 | 负载配置 | 固定 1 并发、1 次迭代，最长时长取 60 秒与被测环境 `maxDurationSec` 中的小者 |
+| 负载 | 施压配置 | 固定 1 并发、1 次迭代，最长时长取 60 秒与被测环境 `maxDurationSec` 中的小者 |
 | 数据集的行 | 按绑定的取法取 | 用 `rows` 指定的行（默认第 0 行） |
 | 初始化段 | 每个 VU 一次 | 每次调试都执行（调试总是一个新的 VU） |
 | 变量的当前值 | 不用 | 只在调试单个接口时覆盖初始值；试跑流程不用 |
@@ -406,7 +408,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 | 等待时间 `thinkTimeMs` | 等待 | **不等待** |
 | 响应体 | 用不到时不保留 | 保留，最多 64 KB（`bodyTruncated` 标出被截断） |
 | 某一步检查不通过 | 本次迭代余下步骤不执行 | 同样不执行，余下步骤以 `status: "skipped"` 返回 |
-| 阈值、判定、Run Record、运行记录、产物、仪表盘、执行机采样 | 有 | **都没有**。调试不进运行列表，产物目录读完即删 |
+| 阈值、判定、Run Record、运行记录、产物、仪表盘、施压机采样 | 有 | **都没有**。调试不进运行记录，产物目录读完即删 |
 | 与其他运行的关系 | 同一时间 1 个 | 有运行在进行时不能调试（409）；调试进行中不能发起运行（409）；同一时间只允许 1 个调试 |
 
 响应（200）：
@@ -559,7 +561,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 ## 4. plan.json（后端 → k6）
 
-后端把发起时的测试、流程、接口、负载配置、环境**展开成一份自包含的 plan**，写到 `results/<runId>/plan.json`，同时作为运行的 `snapshot` 存库。
+后端把发起时的测试、流程、接口、施压配置、环境**展开成一份自包含的 plan**，写到 `results/<runId>/plan.json`，同时作为运行的 `snapshot` 存库。
 
 ```json
 {
@@ -728,7 +730,7 @@ k6 退出后，后端读取 `run-record.json`，补上以下字段，回写文�
   "test": { "id": 1, "name": "百度首页冒烟" },
   "profile": { "id": 1, "name": "冒烟", "model": "closed" },
   "env": { "id": 1, "name": "百度（仅冒烟）", "type": "prod", "baseUrl": "https://www.baidu.com" },
-  "executor": { "id": 1, "name": "本机执行机", "host": "主机名", "cpuCores": 4, "memTotalMb": 15900, "cpuAvgPct": 12.3, "cpuMaxPct": 41.0, "memMaxPct": 55.2, "samples": 9 }
+  "executor": { "id": 1, "name": "本机施压机", "host": "主机名", "cpuCores": 4, "memTotalMb": 15900, "cpuAvgPct": 12.3, "cpuMaxPct": 41.0, "memMaxPct": 55.2, "samples": 9 }
 }
 ```
 

@@ -676,7 +676,7 @@ def validate_test(data: Any, conn: sqlite3.Connection) -> dict:
 
 
 def profile_usage(profile: dict) -> dict:
-    """负载配置实际会用到的并发、到达率、总时长，供预检与环境上限比较。"""
+    """施压配置实际会用到的并发、到达率、总时长，供预检与环境上限比较。"""
     cfg = profile.get("config") or {}
     usage: dict[str, Any] = {"concurrency": None, "rates": [], "durationSec": None}
     if "vus" in cfg:

@@ -17,7 +17,7 @@ import { MODEL_LABELS, demandOf, describeConfig } from '../utils/profile'
 import { DASH } from '../utils/format'
 import EnvTypeTag from './EnvTypeTag.vue'
 
-// 发起运行的对话框：选负载配置和被测环境，显示执行机和安全上限，确认后 POST /api/runs。
+// 发起运行的对话框：选施压配置和被测环境，显示施压机和安全上限，确认后 POST /api/runs。
 const visible = defineModel<boolean>({ required: true })
 const props = defineProps<{ test: TestDef | null }>()
 
@@ -26,7 +26,7 @@ const debugCtx = useDebugContext()
 
 const profiles = ref<Profile[]>([])
 const environments = ref<Environment[]>([])
-/** 将使用的执行机。目前只有本机一台，所以不提供选择 */
+/** 将使用的施压机。目前只有本机一台，所以不提供选择 */
 const executor = ref<Executor | null>(null)
 const loading = ref(false)
 const profileId = ref<number>()
@@ -41,7 +41,7 @@ const environment = computed(() => environments.value.find((e) => e.id === envId
 const over = (need: number | null | undefined, limit: number | null | undefined): boolean =>
   typeof need === 'number' && typeof limit === 'number' && need > limit
 
-/** 负载配置的需求与被测环境安全上限的对照。上限为空表示不限制，不参与比较。只是提示，最终以后端预检为准。 */
+/** 施压配置的需求与被测环境安全上限的对照。上限为空表示不限制，不参与比较。只是提示，最终以后端预检为准。 */
 const limitRows = computed(() => {
   const env = environment.value
   if (!env) return []
@@ -81,14 +81,14 @@ async function loadOptions(): Promise<void> {
     if (current !== undefined && e.some((env) => env.id === current)) envId.value = current
     else if (e.length === 1) envId.value = e[0].id
   } catch (err) {
-    showError(err, '加载负载配置和被测环境失败')
+    showError(err, '加载施压配置和被测环境失败')
   } finally {
     loading.value = false
   }
 }
 
 async function loadExecutor(): Promise<void> {
-  // 取不到执行机不影响发起：请求里不带 executorId，后端默认用本机执行机
+  // 取不到施压机不影响发起：请求里不带 executorId，后端默认用本机施压机
   try {
     const list = await executorsApi.list()
     executor.value = list[0] ?? null
@@ -142,8 +142,8 @@ async function confirm(): Promise<void> {
       <el-form-item label="测试">
         <strong>{{ test?.name }}</strong>
       </el-form-item>
-      <el-form-item label="负载配置" required>
-        <el-select v-model="profileId" placeholder="选择负载配置" style="width: 100%" no-data-text="还没有负载配置">
+      <el-form-item label="施压配置" required>
+        <el-select v-model="profileId" placeholder="选择施压配置" style="width: 100%" no-data-text="还没有施压配置">
           <el-option v-for="p in profiles" :key="p.id" :label="`${p.name}（${p.model}）`" :value="p.id" />
         </el-select>
         <div v-if="profile" class="form-hint">
@@ -170,7 +170,7 @@ async function confirm(): Promise<void> {
         </div>
       </el-form-item>
 
-      <el-form-item label="执行机">
+      <el-form-item label="施压机">
         <template v-if="executor">
           <span>{{ executor.name }}</span>
           <span class="muted executor-host">
@@ -178,7 +178,7 @@ async function confirm(): Promise<void> {
             <template v-if="executor.ip"> · <span class="mono">{{ executor.ip }}</span></template>
           </span>
         </template>
-        <span v-else class="muted">本机执行机（默认）</span>
+        <span v-else class="muted">本机施压机（默认）</span>
       </el-form-item>
 
       <el-form-item v-if="environment" label="安全上限">
@@ -186,7 +186,7 @@ async function confirm(): Promise<void> {
           <thead>
             <tr>
               <th />
-              <th>负载配置需要</th>
+              <th>施压配置需要</th>
               <th>被测环境的上限</th>
               <th />
             </tr>

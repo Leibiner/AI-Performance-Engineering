@@ -1,7 +1,7 @@
 // Composer：plan（业务 + 负载 + SLO）→ k6 options。
 //
 // 每个 flow 编译成一个 k6 scenario，scenario 名 = flow.key。
-// 负载配置的四种形态（契约 §3.1）：
+// 施压配置的四种形态（契约 §3.1）：
 //   closed + iterations            → shared-iterations
 //   closed + durationSec           → constant-vus
 //   open   + rate                  → constant-arrival-rate
@@ -162,7 +162,7 @@ function detectShape(profile) {
     if (Array.isArray(c.stages)) return 'ramping-arrival-rate';
     if (c.rate !== undefined && c.rate !== null) return 'constant-arrival-rate';
   }
-  fail(`无法识别的负载配置形态：model=${profile.model}，config=${JSON.stringify(c)}`);
+  fail(`无法识别的施压配置形态：model=${profile.model}，config=${JSON.stringify(c)}`);
 }
 
 export function buildScenarios(plan) {

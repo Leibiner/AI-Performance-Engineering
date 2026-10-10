@@ -138,7 +138,7 @@ function textSummary(record, plan) {
   const o = record.metrics.overall;
   const lines = [
     '',
-    `运行 ${record.runId}｜测试：${plan.test ? plan.test.name : '-'}｜负载：${plan.profile.name || '-'}（${plan.profile.model}）`,
+    `运行 ${record.runId}｜测试：${plan.test ? plan.test.name : '-'}｜施压配置：${plan.profile.name || '-'}（${plan.profile.model}）`,
     `k6 判定：${VERDICT_TEXT[record.k6Verdict]}`,
     `${o.scope === 'main' ? '业务请求（不含初始化段）' : '请求'} ${o.reqs} 次（${fmt(o.rps)} 次/秒），迭代 ${o.iterations} 次，丢弃 ${o.droppedIterations} 次，错误率 ${pct(o.errorRate)}，检查通过率 ${pct(o.checksRate)}`,
     `响应时间 avg ${fmt(o.avg, ' ms')}｜p95 ${fmt(o.p95, ' ms')}｜p99 ${fmt(o.p99, ' ms')}｜max ${fmt(o.max, ' ms')}`,

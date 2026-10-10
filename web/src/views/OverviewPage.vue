@@ -52,13 +52,13 @@ onBeforeUnmount(() => {
 const countCards = computed(() => {
   const c = data.value?.counts
   return [
-    { label: '执行机', value: c?.executors ?? executorCount.value, to: '/executors' },
-    { label: '被测环境', value: c?.environments, to: '/environments' },
     { label: '接口', value: c?.apis, to: '/apis' },
     { label: '业务流程', value: c?.flows, to: '/flows' },
-    { label: '负载配置', value: c?.profiles, to: '/profiles' },
+    { label: '施压配置', value: c?.profiles, to: '/profiles' },
     { label: '测试', value: c?.tests, to: '/tests' },
-    { label: '运行', value: c?.runs, to: '/runs' },
+    { label: '运行记录', value: c?.runs, to: '/runs' },
+    { label: '被测环境', value: c?.environments, to: '/environments' },
+    { label: '施压机', value: c?.executors ?? executorCount.value, to: '/executors' },
   ]
 })
 
@@ -132,7 +132,7 @@ const verdictRows = computed(() => {
           </template>
         </el-table-column>
         <el-table-column prop="testName" label="测试" min-width="160" show-overflow-tooltip />
-        <el-table-column prop="profileName" label="负载配置" min-width="110" show-overflow-tooltip />
+        <el-table-column prop="profileName" label="施压配置" min-width="110" show-overflow-tooltip />
         <el-table-column label="被测环境" min-width="150" show-overflow-tooltip>
           <template #default="{ row }">
             <EnvTypeTag :type="row.envType" class="env-tag" />{{ row.envName }}

@@ -128,7 +128,7 @@ const multiFlow = computed(() => new Set(steps.value.map((s) => s.flowKey)).size
 const pct = (value: number | null | undefined): string =>
   value === null || value === undefined ? DASH : `${formatNumber(value, 1)}%`
 
-/** 运行期间对执行机的采样（record.executor）。旧的运行记录没有，返回 null */
+/** 运行期间对施压机的采样（record.executor）。旧的运行记录没有，返回 null */
 const executorStats = computed(() => {
   const x = record.value?.executor
   if (!x) return null
@@ -151,7 +151,7 @@ function formatClock(ms: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-/** 负载配置里的计划时长（秒），用于运行中的进度提示 */
+/** 施压配置里的计划时长（秒），用于运行中的进度提示 */
 const plannedSec = computed(() => {
   const profile = run.value?.snapshot?.profile
   if (!profile?.config) return null
@@ -284,11 +284,11 @@ async function rerun(): Promise<void> {
   const r = run.value
   if (!r) return
   if (r.testId === null || r.profileId === null || r.envId === null) {
-    ElMessage.warning('这次运行用到的测试、负载配置或被测环境已经被删除，无法再次运行')
+    ElMessage.warning('这次运行用到的测试、施压配置或被测环境已经被删除，无法再次运行')
     return
   }
   const ok = await confirmAction(
-    `用同样的测试「${r.testName}」、负载配置「${r.profileName}」、被测环境「${r.envName}」再运行一次？如果这些定义在上次运行后被修改过，会按现在的内容执行。`,
+    `用同样的测试「${r.testName}」、施压配置「${r.profileName}」、被测环境「${r.envName}」再运行一次？如果这些定义在上次运行后被修改过，会按现在的内容执行。`,
     '再次运行',
   )
   if (!ok) return
@@ -317,7 +317,7 @@ async function rerun(): Promise<void> {
   <div v-loading="loading" class="page">
     <el-result v-if="loadError" icon="error" title="无法加载这次运行" :sub-title="loadError">
       <template #extra>
-        <el-button type="primary" @click="router.push('/runs')">返回运行列表</el-button>
+        <el-button type="primary" @click="router.push('/runs')">返回运行记录</el-button>
       </template>
     </el-result>
 
@@ -325,7 +325,7 @@ async function rerun(): Promise<void> {
       <div class="page-header">
         <div>
           <router-link class="back-link" to="/runs">
-            <el-icon><ArrowLeft /></el-icon>运行列表
+            <el-icon><ArrowLeft /></el-icon>运行记录
           </router-link>
           <h1 class="page-title">
             {{ run.testName }}
@@ -381,12 +381,12 @@ async function rerun(): Promise<void> {
           <p v-else class="muted empty-line">{{ stopping ? '已发出停止信号，等待 k6 退出…' : '等待 k6 输出进度…' }}</p>
           <dl class="meta-grid progress-meta">
             <div><dt>测试</dt><dd>{{ run.testName }}</dd></div>
-            <div><dt>负载配置</dt><dd>{{ run.profileName }}</dd></div>
+            <div><dt>施压配置</dt><dd>{{ run.profileName }}</dd></div>
             <div>
               <dt>被测环境</dt>
               <dd>{{ run.envName }} <EnvTypeTag :type="run.envType" /></dd>
             </div>
-            <div v-if="run.executorName"><dt>执行机</dt><dd>{{ run.executorName }}</dd></div>
+            <div v-if="run.executorName"><dt>施压机</dt><dd>{{ run.executorName }}</dd></div>
             <div><dt>开始时间</dt><dd class="num">{{ formatTime(run.startedAt) }}</dd></div>
           </dl>
         </div>
@@ -400,7 +400,7 @@ async function rerun(): Promise<void> {
             <div v-if="record?.verdictReason" class="verdict-reason">原因：{{ record.verdictReason }}</div>
           </div>
           <dl class="verdict-meta">
-            <div><dt>负载配置</dt><dd>{{ run.profileName }}</dd></div>
+            <div><dt>施压配置</dt><dd>{{ run.profileName }}</dd></div>
             <div>
               <dt>被测环境</dt>
               <dd>
@@ -408,7 +408,7 @@ async function rerun(): Promise<void> {
                 <span v-if="run.envType" class="banner-pill">{{ envTypeLabel(run.envType) }}</span>
               </dd>
             </div>
-            <div v-if="run.executorName"><dt>执行机</dt><dd>{{ run.executorName }}</dd></div>
+            <div v-if="run.executorName"><dt>施压机</dt><dd>{{ run.executorName }}</dd></div>
             <div><dt>开始时间</dt><dd class="num">{{ formatTime(run.startedAt) }}</dd></div>
             <div><dt>用时</dt><dd class="num">{{ formatDuration(elapsedMs(run.startedAt, run.endedAt)) }}</dd></div>
             <div><dt>k6 退出码</dt><dd class="num">{{ run.exitCode ?? DASH }}</dd></div>
@@ -436,9 +436,9 @@ async function rerun(): Promise<void> {
           <p v-else class="muted empty-line">这次运行没有有效性检查项。</p>
         </div>
 
-        <!-- 执行机在运行期间的资源占用。旧的运行记录没有这一项，不显示 -->
+        <!-- 施压机在运行期间的资源占用。旧的运行记录没有这一项，不显示 -->
         <div v-if="executorStats" class="panel">
-          <h2 class="panel-title">执行机 <small>不参与判定</small></h2>
+          <h2 class="panel-title">施压机 <small>不参与判定</small></h2>
           <div class="stat-grid">
             <div v-for="item in executorStats" :key="item.label" class="stat">
               <div class="stat-label">{{ item.label }}</div>
@@ -591,7 +591,7 @@ async function rerun(): Promise<void> {
               </dd>
             </div>
             <div v-if="snapshot.profile?.config">
-              <dt>负载</dt>
+              <dt>施压配置</dt>
               <dd>
                 {{ MODEL_LABELS[snapshot.profile.model] }}：{{ describeConfig(snapshot.profile.model, snapshot.profile.config) }}
               </dd>

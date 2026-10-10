@@ -60,7 +60,7 @@ function resource<T, TInput>(name: string): ResourceApi<T, TInput> {
   }
 }
 
-/** 执行机没有新增和删除（契约 §3.3），只能查看和改名称、备注。 */
+/** 施压机没有新增和删除（契约 §3.3），只能查看和改名称、备注。 */
 export const executorsApi = {
   list: () => request<Executor[]>('GET', '/executors'),
   get: (id: number) => request<Executor>('GET', `/executors/${id}`),
