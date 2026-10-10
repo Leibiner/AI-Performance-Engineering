@@ -96,6 +96,13 @@
 | 请求体大小上限 | 服务没有鉴权、监听 `0.0.0.0`。没有上限时一个 200 MB 的 base64 请求把进程 RSS 撑到约 900 MB 才返回"超过 10 MiB"（审查实测）。现在纯 ASGI 中间件按 `Content-Length` 先拒绝（413），分块传输边读边计数；后者要抛 FastAPI 的 `HTTPException`：FastAPI 解析请求体时会把其他异常一律换成 400 | 2026-10-10 |
 | sqlite 存不下超过 64 位的整数 | 把 `2**70` 之类的 id 交给 sqlite 会抛 `OverflowError`，变成 500。`is_int` 加上 ±2^63 的范围 | 2026-10-10 |
 | 上传文件的头注入 | `contentType` 会原样进响应头和 multipart 的分段头，校验正则里不能用 `\s`（放过 `\r\n`）。下载响应带 `nosniff` 和 `CSP: sandbox`，防止上传的 HTML 在本站执行脚本 | 2026-10-10 |
+| YAML 别名展开 | PyYAML 的 `safe_load` 对别名不复制，只是共享同一个对象，所以 1 KB 的文档可以代表上千万个节点（7 层、每层 10 个的别名炸弹）；解析本身不慢，展开发生在之后的遍历和序列化里。导入时复制示例值、按 schema 生成示例、展开表单字段都计入 20 万个节点的预算，超了返回 400 | 2026-10-10 |
+| YAML 1.1 的类型 | `200:` 这样的响应码键读成整数，`swagger: 2.0` 读成浮点数 `2.0`，`on` / `yes` 读成布尔；日期读成 `date` 对象（`json.dumps` 会失败）。导入时版本号、响应码一律按字符串比较，示例值复制时把非 JSON 类型转成字符串 | 2026-10-10 |
+| OpenAPI 没写 servers | 规范规定等于 `/`，相对文档所在的位置；相对地址的 servers 同理。FastAPI 生成的 `openapi.json` 没有 servers，按地址导入时用文档地址的协议 + 主机作为原地址，才能和被测环境对上；粘贴内容时不知道文档地址，原地址为空。Swagger 2.0 没写 `host` 时同样用提供文档的主机 | 2026-10-10 |
+| FastAPI 的可选 Cookie 参数 | 用 `Cookie()` 声明的可选参数（如登录 token）会出现在每个接口的 parameters 里。导入时可选参数只列在备注里，可选的 cookie 不列，否则每个接口都多一句没用的提示 | 2026-10-10 |
+| 导入的 form-data 文件项 | 文档里的文件项没有对应的已上传文件，`fileId` 只能是 `null`；保存规则要求 form-data 的文件项必须选了文件。导入时这类接口按 `raw` 保存（`raw` 时表单只保留不发送，不要求填完），文件项原样留着，备注里说明"选好文件后切回 form-data" | 2026-10-10 |
+| Postman 脚本转提取规则 | 不执行脚本，只用正则认最常见的写法：`.set('x', 值)` / `setEnvironmentVariable('x', 值)`，值是 `pm.response.json()` 或 `JSON.parse(responseBody)`（含先赋给一个变量）后接 `.a`、`[0]`、`['a-b']`，或 `pm.response.headers.get('X')`；转成 GJSON 路径 `a.0.a-b` 或响应头提取。其余脚本不导入，在备注里说明 | 2026-10-10 |
+| urllib 的重定向 | `urlopen` 默认跟随重定向，并且除了 http / https 还会跟到 ftp（`file://` 会被拒）。按地址取文档时换成只允许 http / https 的 `HTTPRedirectHandler`：`redirect_request` 返回 `None`，后面的处理器把这次 3xx 当成 HTTPError 抛出 | 2026-10-10 |
 
 ## 4. 前端
 

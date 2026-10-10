@@ -9,10 +9,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 已实现和未实现的能力以 `docs/ARCHITECTURE.md` §1.1 状态表为准；MVP 相对 Phase 0 原设计的出入见 §1.2。
 - 基线对比、趋势、CI、Prometheus / Grafana、Trace、Evidence Bundle、分布式、任何 AI 功能都**还没有实现**，不要当成已有能力来用或引用。
 - 不要主动开始下一个阶段的实现；不要提前创建空目录（规划中的目录见 `ARCHITECTURE.md` §5.2 末尾的表）。
-- 2026-10-09 加入**调试**：接口页是 Postman 式工作台，能把正在编辑的接口用真实 k6 发送一次看响应；业务流程页能试跑一次迭代；支持从 cURL 导入接口。OpenAPI / Postman Collection 导入**未做**。
+- 2026-10-09 加入**调试**：接口页是 Postman 式工作台，能把正在编辑的接口用真实 k6 发送一次看响应；业务流程页能试跑一次迭代；支持从 cURL 导入接口。
 - 2026-10-09 加入**环境变量**（`environments.variables`，表结构版本 4）：初始值进 plan 的 `env.variables`，每次迭代从它开始；调试的当前值按环境存在浏览器里，提取到的变量自动写回。接口页请求头显示继承自环境的请求头。
 - 2026-10-09 加入**接口文件夹**（`folders` 表，可嵌套；`apis.folder_id`，表结构版本 3）：只用于页面分组，不进 plan、不影响运行；非空文件夹不能删。
 - 2026-10-10 加入**测试数据与变量分层**（ADR-006，表结构版本 5）：数据集（`datasets`，CSV 由后端解析，绑定在业务流程上，按顺序 / 随机 / 每个 VU 固定一行，用完时循环或判 `invalid`）、文件（`files`，multipart 上传用）、流程变量、动态变量 `{{$uuid}}` 等、业务流程的初始化段（每个 VU 一次，不计入业务 SLO）、请求体 raw / x-www-form-urlencoded / form-data、提取支持 GJSON 和 Cookie。预检静态检查变量来源；流程试跑不再用浏览器里的当前值；调试单个接口可以先跑上游接口、选一行数据。分层和字段见契约 §3.1「变量」、§3.6、§3.7、§4。
+- 2026-10-10 加入**接口导入**（`server/imports.py`，契约 §3.9）：OpenAPI 3.x / Swagger 2.0（JSON、YAML，用 PyYAML）/ Postman Collection v2 → 文件夹和接口，先预览再整批导入。映射规则参照 Hoppscotch（MIT），按本项目的模型改写，不搬它的代码；它的其他可借鉴之处和不适用的原因见 `docs/research/hoppscotch.md`。
 
 ## 命令
 

@@ -1,6 +1,6 @@
 # MVP 契约：三方接口约定
 
-> 日期：2026-09-30，2026-10-09 加入调试（§3.5、§4 `debug`、§5.1），2026-10-10 加入测试数据与变量分层（§3.1「变量」、§3.6、§3.7，ADR-006）｜ 适用：MVP（`docs/plans/mvp-plan.md`）
+> 日期：2026-09-30，2026-10-09 加入调试（§3.5、§4 `debug`、§5.1），2026-10-10 加入测试数据与变量分层（§3.1「变量」、§3.6、§3.7，ADR-006）、接口导入（§3.9）｜ 适用：MVP（`docs/plans/mvp-plan.md`）
 > 本文是执行引擎（`perf/`）、后端（`server/`）、前端（`web/`）之间的**唯一约定**。三方并行开发，任何一方发现约定不够用或有问题，先改本文，再改代码。
 
 ---
@@ -558,6 +558,63 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 `<引用方中文名>“<名称>”<位置>引用的<被引用方中文名> #<id> 已被删除（失效引用）：换一个<被引用方中文名>，或移除这一项`
 
 例如：`业务流程“访问首页”第 1 步引用的接口 #1 已被删除（失效引用）：换一个接口，或移除这一项`。页面上失效引用显示为 `<被引用方中文名>已删除（#<id>）`。
+
+### 3.9 导入 `/api/imports`（2026-10-10 加入）
+
+把 OpenAPI 3.x / Swagger 2.0（JSON 或 YAML）、Postman Collection v2.0 / v2.1（JSON）里的请求导入成文件夹和接口。分两步：预览只解析不保存，页面勾选后整批导入。只解析文档，不访问被测接口，不建被测环境。映射规则参照 Hoppscotch 的导入器，按本项目的接口模型改写（`docs/research/hoppscotch.md`）。
+
+| 接口 | 说明 |
+|---|---|
+| `POST /api/imports/preview` | body：`{ "text": "…" }`（文档内容，≤ 10 MiB）或 `{ "url": "http://…" }`（后端去取，只认 http / https，15 秒超时，≤ 10 MiB，按 UTF-8 解码），两者给一个。返回 200 和预览（下文）。认不出格式、解析失败、取不到返回 400，`message` 说明原因：cURL 命令、HAR、Insomnia、Postman v1、Postman 环境文件各有提示；YAML 别名展开过大也是 400 |
+| `POST /api/imports` | body：`{ "folderId": null, "folders": [...], "apis": [...] }`。`folderId` 是导入到哪个文件夹下（`null` 为根目录）；`folders` 同预览，只给要建的，`parentKey` 必须指向排在前面的项，`null` 表示建在 `folderId` 下；`apis` 每项是一份接口定义（§3.1 接口的字段，不含 `folderId`）加 `folderKey`（`null` 表示放在 `folderId` 下）。在一个事务里建文件夹、按保存接口的规则逐个校验并新建；任何一项不通过返回 400、`details` 逐条列出、什么都不建。成功返回 201 `{ "folderIds": [...], "apiIds": [...] }`（按请求里的顺序）。一次最多 2000 个接口 |
+
+预览：
+
+```json
+{ "format": "postman", "formatLabel": "Postman Collection v2.1", "title": "test_port 接口调试",
+  "baseUrls": ["http://192.168.0.136:8200"],
+  "variables": [{ "name": "baseUrl", "value": "http://192.168.0.136:8200" }],
+  "folders": [{ "key": "f0", "name": "test_port 接口调试", "parentKey": null },
+              { "key": "f2", "name": "1. 认证", "parentKey": "f0" }],
+  "apis": [{ "key": "a2", "folderKey": "f2",
+             "api": { "name": "登录", "method": "POST", "path": "/api/auth/login",
+                      "headers": { "Content-Type": "application/json" }, "bodyType": "raw", "body": "{…}", "form": [],
+                      "expectStatus": 200, "expectBodyContains": null,
+                      "extracts": [{ "var": "token", "from": "json", "expr": "data.token" }],
+                      "note": "测试脚本里的赋值转成了提取：token ← data.token；脚本本身没有导入" },
+             "notes": ["测试脚本里的赋值转成了提取：token ← data.token；脚本本身没有导入"],
+             "duplicateOf": { "id": 5, "name": "登录" }, "problems": [] }],
+  "skipped": [{ "name": "商品是否存在（HEAD）", "reason": "不支持 HEAD 方法" }],
+  "warnings": [] }
+```
+
+- `format`：`openapi`、`swagger`、`postman`。`key` 只在这次预览和提交之间有效
+- `folders` 只含装着接口的文件夹（和它们的上级）；第一个是以文档标题命名的顶层文件夹
+- `baseUrls`：文档里的服务地址（协议 + 主机），对应被测环境的 `baseUrl`；可能是没有值的 `{{变量}}`
+- `variables`：Postman 的集合变量（不导入，供参考）
+- `duplicateOf`：库里方法和路径（含 query）都相同的第一个接口，页面默认不勾选
+- `problems`：按 §3.1 保存接口的规则校验不通过的原因；不为空的不能导入
+- `notes`：没能原样导入的内容，和文档里的说明一起已写进 `api.note`
+- `skipped`：不能导入的请求；`warnings`：整份文档层面的问题（外部 `$ref`、集合 / 文件夹上的脚本）
+
+**映射规则**
+
+| 文档里 | 导入成 |
+|---|---|
+| OpenAPI `servers[0]`（操作 > 路径 > 文档；`{变量}` 用默认值；相对地址相对文档地址；没写等于 `/`）；Swagger `schemes` + `host` + `basePath`（没写 host 时用提供文档的主机） | 协议 + 主机进 `baseUrls`；路径前缀进接口的 `path` |
+| OpenAPI 操作的第一个标签；Postman 的文件夹 | 文件夹（Postman 的嵌套保留）；没有标签的放在顶层文件夹里 |
+| 路径参数 `{id}`；Postman 路径变量 `:id` | `{{id}}`（名字里变量名不允许的字符换成 `_`）；Postman 路径变量有值时用那个值 |
+| 必填的 query、header、cookie 参数 | 值依次取 `example`、`examples`、`x-example`、`default`、枚举的第一个，都没有时写 `{{参数名}}`。可选参数不导入，名字列在备注里（可选的 cookie 不列） |
+| Bearer、OAuth 2.0、OpenID Connect 认证 | `Authorization: Bearer {{token}}`（Postman 里填了 token 时用原值） |
+| Basic 认证 | OpenAPI：`Authorization: Basic {{basicAuth}}`；Postman 的用户名和密码都是常量时直接算成 base64 |
+| API Key | 对应的请求头、query 或 Cookie；OpenAPI 的值写 `{{名称}}`，Postman 用原值 |
+| JSON 请求体（含 `+json`、带 `charset` 的写法） | `raw`，并加 `Content-Type`。优先用示例，否则按 schema 生成：`allOf` 合并，`oneOf` / `anyOf` 取第一个，`readOnly` 字段不要，递归的引用再次出现时为 `null`（数组为空），按 `format` 给占位值 |
+| x-www-form-urlencoded、form-data | `form`、`multipart`；有文件项时按 `raw` 保存（文件项的 `fileId` 为 `null`），在页面上选好文件后切回 form-data |
+| text/*、application/xml 请求体 | `raw` + 原 `Content-Type` |
+| Postman GraphQL 请求体 | `raw`，JSON `{ "query", "variables" }` |
+| 第一个 2xx 响应码；Postman 保存的示例里最小的 2xx | `expectStatus`，没有时为 200 |
+| Postman 测试脚本里把响应存成变量的写法：`pm.environment` / `pm.collectionVariables` / `pm.globals` / `pm.variables` 的 `.set('x', …)`、`postman.setEnvironmentVariable`，值为 `pm.response.json()` 或 `JSON.parse(responseBody)`（含先赋给变量再取）后接 `.a.b[0]`，或 `pm.response.headers.get('X')` | 提取规则（`json` 的 GJSON 路径如 `data.items.0.id`，或 `header`）。脚本本身不导入（ADR-006） |
+| HEAD、OPTIONS、TRACE；二进制请求体；外部文件的 `$ref`；其他认证方式；Postman 里禁用的行；前置脚本；集合 / 文件夹上的脚本；引擎不认识的动态变量（如 `{{$randomEmail}}`） | 不导入或原样保留，在 `skipped`、`notes`、`warnings` 里说明 |
 
 ## 4. plan.json（后端 → k6）
 

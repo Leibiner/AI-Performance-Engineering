@@ -22,6 +22,10 @@ import type {
   Folder,
   FolderInput,
   ImpactNode,
+  ImportInput,
+  ImportPreview,
+  ImportResult,
+  ImportSource,
   Overview,
   Profile,
   ProfileInput,
@@ -143,4 +147,10 @@ export const overviewApi = {
 /** 引用（契约 §3.8）：删除一个对象会让哪些引用失效，逐层包含间接受影响的对象 */
 export const referencesApi = {
   impact: (kind: RefKind, id: number) => request<ImpactNode>('GET', `/references/${kind}/${id}`),
+}
+
+/** 导入 OpenAPI / Swagger / Postman Collection（契约 §3.9）：先预览，勾选后整批导入，全部成功或全部不做 */
+export const importsApi = {
+  preview: (source: ImportSource) => request<ImportPreview>('POST', '/imports/preview', { body: source }),
+  create: (input: ImportInput) => request<ImportResult>('POST', '/imports', { body: input }),
 }

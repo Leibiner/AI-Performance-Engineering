@@ -28,6 +28,7 @@ const emit = defineEmits<{
   select: [api: ApiDef]
   create: [folderId: number | null]
   import: [folderId: number | null]
+  'import-doc': []
   'create-folder': [parentId: number | null]
   'rename-folder': [folder: Folder]
   'delete-folder': [folder: Folder]
@@ -142,6 +143,7 @@ function onFolderCommand(command: string, folder: Folder): void {
 function onNewCommand(command: string): void {
   if (command === 'api') emit('create', null)
   else if (command === 'import') emit('import', null)
+  else if (command === 'import-doc') emit('import-doc')
   else if (command === 'folder') emit('create-folder', null)
 }
 
@@ -165,6 +167,7 @@ function filterNode(value: string, item: Record<string, unknown>): boolean {
           <el-dropdown-menu class="new-menu">
             <el-dropdown-item command="api">新建接口</el-dropdown-item>
             <el-dropdown-item command="import">从 cURL 导入接口</el-dropdown-item>
+            <el-dropdown-item command="import-doc">从 OpenAPI / Postman 导入接口</el-dropdown-item>
             <el-dropdown-item divided command="folder">新建文件夹</el-dropdown-item>
           </el-dropdown-menu>
         </template>

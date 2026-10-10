@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ApiError, apisApi, foldersApi, type ApiDef, type Folder } from '../api'
+import { ApiError, apisApi, foldersApi, type ApiDef, type Folder, type ImportResult } from '../api'
 import { useResourceList } from '../composables/useResourceList'
 import { confirmAction, errorMessage, showError } from '../utils/feedback'
 import { emptyForm, formProblem, fromApi, snapshot, toInput, type ApiForm } from '../utils/api-form'
@@ -13,6 +13,7 @@ import PageHeader from '../components/PageHeader.vue'
 import ApiList from '../components/apis/ApiList.vue'
 import ApiEditor from '../components/apis/ApiEditor.vue'
 import CurlImportDialog from '../components/apis/CurlImportDialog.vue'
+import ImportDialog from '../components/apis/ImportDialog.vue'
 import DebugEnvBar from '../components/debug/DebugEnvBar.vue'
 
 const { items, loading, load, remove } = useResourceList(apisApi, '接口', 'api')
@@ -288,6 +289,14 @@ async function onImported(result: CurlImport): Promise<void> {
   ElMessage.success(`已填入 ${result.input.method} ${result.input.path}，改好名字后保存`)
 }
 
+const docImportVisible = ref(false)
+async function onDocImported(result: ImportResult, title: string): Promise<void> {
+  await Promise.all([load(), loadFolders()])
+  ElMessage.success(`已导入 ${result.apiIds.length} 个接口到「${title}」`)
+  const first = items.value.find((a) => a.id === result.apiIds[0])
+  if (first) await select(first)
+}
+
 async function save(): Promise<void> {
   if (!form.value) return
   // 已保存的接口：立即保存（Ctrl + S），结果显示在名称旁边
@@ -353,6 +362,7 @@ async function del(): Promise<void> {
         @select="select"
         @create="create"
         @import="openImport"
+        @import-doc="docImportVisible = true"
         @create-folder="createFolder"
         @rename-folder="renameFolder"
         @delete-folder="deleteFolder"
@@ -381,6 +391,7 @@ async function del(): Promise<void> {
       </section>
     </div>
     <CurlImportDialog v-model="importVisible" @imported="onImported" />
+    <ImportDialog v-model="docImportVisible" :folder-options="folderSelectOptions" @imported="onDocImported" />
   </div>
 </template>
 

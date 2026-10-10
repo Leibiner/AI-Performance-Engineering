@@ -706,3 +706,56 @@ export interface DebugResult {
   steps: DebugStep[]
   vars: Record<string, string>
 }
+
+/** 导入（契约 §3.9）：text 和 url 给一个 */
+export interface ImportSource {
+  /** 文档内容：JSON 或 YAML */
+  text?: string
+  /** 文档地址，由后端去取 */
+  url?: string
+}
+export type ImportFormat = 'openapi' | 'swagger' | 'postman'
+/** key 只在这次预览和提交之间有效；parentKey 指向排在前面的文件夹 */
+export interface ImportFolderDraft {
+  key: string
+  name: string
+  parentKey: string | null
+}
+export type ImportApi = Omit<ApiDefInput, 'folderId'>
+export interface ImportApiDraft {
+  key: string
+  folderKey: string | null
+  api: ImportApi
+  /** 没能原样导入的内容（已写进接口备注） */
+  notes: string[]
+  /** 库里已有方法和路径都相同的接口 */
+  duplicateOf: { id: number; name: string } | null
+  /** 按保存规则校验不通过的原因；不为空时不能导入 */
+  problems: string[]
+}
+export interface ImportPreview {
+  format: ImportFormat
+  /** 如 "OpenAPI 3.1.0"、"Postman Collection v2.1" */
+  formatLabel: string
+  title: string
+  /** 文档里的服务地址（协议 + 主机），对应被测环境的 baseUrl；可能是没有值的 {{变量}} */
+  baseUrls: string[]
+  /** Postman 的集合变量 */
+  variables: { name: string; value: string }[]
+  /** 只含装着接口的文件夹，第一个是以文档标题命名的顶层文件夹 */
+  folders: ImportFolderDraft[]
+  apis: ImportApiDraft[]
+  /** 不能导入的请求，如 HEAD 方法 */
+  skipped: { name: string; reason: string }[]
+  warnings: string[]
+}
+export interface ImportInput {
+  /** 导入到哪个文件夹下；null 为根目录 */
+  folderId: number | null
+  folders: ImportFolderDraft[]
+  apis: (ImportApi & { folderKey: string | null })[]
+}
+export interface ImportResult {
+  folderIds: number[]
+  apiIds: number[]
+}
