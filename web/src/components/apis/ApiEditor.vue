@@ -37,6 +37,9 @@ const props = defineProps<{
   isNew: boolean
   dirty: boolean
   saving: boolean
+  /** 已保存接口的自动保存状态 */
+  saveStatus: 'saving' | 'saved' | 'error' | null
+  saveError: string
   folderOptions: FolderOption[]
   producers: Record<string, string[]>
 }>()
@@ -241,9 +244,13 @@ const upstreamSteps = computed(() => result.value?.steps.slice(0, -1) ?? [])
 const upstreamOpen = ref<string[]>([])
 
 function onKey(e: KeyboardEvent): void {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+  if (!(e.ctrlKey || e.metaKey)) return
+  if (e.key === 'Enter') {
     e.preventDefault()
     void send()
+  } else if (e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    emit('save')
   }
 }
 onMounted(() => window.addEventListener('keydown', onKey))
@@ -278,7 +285,12 @@ async function copyCurl(): Promise<void> {
         title="所属文件夹"
         :disabled="!folderOptions.length"
       />
-      <span v-if="dirty" class="unsaved">未保存</span>
+      <span v-if="isNew && dirty" class="unsaved">未保存</span>
+      <el-tooltip v-else-if="saveStatus === 'error'" :content="saveError" placement="bottom">
+        <span class="unsaved">未保存</span>
+      </el-tooltip>
+      <span v-else-if="saveStatus === 'saving'" class="save-state">保存中</span>
+      <span v-else-if="saveStatus === 'saved' && !dirty" class="save-state">已保存</span>
       <div class="editor-actions">
         <el-button text :icon="DocumentCopy" @click="copyCurl">复制为 cURL</el-button>
         <el-button v-if="!isNew" text :icon="CopyDocument" @click="emit('duplicate')">复制接口</el-button>
@@ -315,7 +327,9 @@ async function copyCurl(): Promise<void> {
         </el-tooltip>
         <UpstreamPicker v-model="upstream" :candidates="upstreamCandidates" :pending="pendingVars" />
       </div>
-      <el-button :loading="saving" :disabled="!dirty" @click="emit('save')">保存</el-button>
+      <el-tooltip v-if="isNew" content="Ctrl + S" placement="bottom">
+        <el-button :loading="saving" :disabled="!dirty" @click="emit('save')">保存</el-button>
+      </el-tooltip>
     </div>
 
     <el-tabs v-model="tab" class="req-tabs">
@@ -514,6 +528,11 @@ async function copyCurl(): Promise<void> {
 .folder-select {
   width: 200px;
   flex-shrink: 0;
+}
+.save-state {
+  flex-shrink: 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 .unsaved {
   flex-shrink: 0;

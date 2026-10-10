@@ -57,7 +57,24 @@ const data = computed<TreeItem[]>(() => {
 })
 const isEmpty = computed(() => props.items.length === 0 && props.folders.length === 0 && props.draftFolderId === undefined)
 
-const expanded = ref<string[]>([])
+// 展开的文件夹记在本地，回到接口页时树还是离开时的样子
+const EXPANDED_KEY = 'perf-console.apis.expanded'
+function readExpanded(): string[] {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? '[]')
+    return Array.isArray(saved) ? saved.filter((k): k is string => typeof k === 'string' && k.startsWith('f-')) : []
+  } catch {
+    return []
+  }
+}
+const expanded = ref<string[]>(readExpanded())
+watch(expanded, (keys) => {
+  try {
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify(keys))
+  } catch {
+    // 存不了只是下次要重新展开
+  }
+})
 function onExpand(item: TreeItem): void {
   if (!expanded.value.includes(item.key)) expanded.value = [...expanded.value, item.key]
 }
@@ -86,7 +103,12 @@ function reveal(folderId: number | null | undefined): void {
 
 const activeKey = ref<string | null>(null)
 function applyCurrent(): void {
-  void nextTick(() => treeRef.value?.setCurrentKey(activeKey.value ?? undefined))
+  void nextTick(() => {
+    treeRef.value?.setCurrentKey(activeKey.value ?? undefined)
+    // 回到上次的接口时它可能在长列表的下面
+    const el = treeRef.value?.$el as HTMLElement | undefined
+    el?.querySelector('.el-tree-node.is-current > .el-tree-node__content')?.scrollIntoView({ block: 'nearest' })
+  })
 }
 watch(
   () => [props.selectedId, props.draftFolderId] as const,

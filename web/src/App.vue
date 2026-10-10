@@ -73,7 +73,8 @@ onBeforeUnmount(() => window.clearInterval(timer))
     </el-aside>
     <el-main class="layout-main">
       <!-- 以完整路径为 key：从一个运行跳到另一个运行时重新创建页面 -->
-      <router-view :key="route.fullPath" />
+      <!-- 按路径而不是完整地址：查询参数变了（如接口页的 ?id=）不重建页面 -->
+      <router-view :key="route.path" />
     </el-main>
   </el-container>
 </template>

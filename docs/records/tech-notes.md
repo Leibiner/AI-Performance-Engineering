@@ -137,6 +137,9 @@
 | `defineModel` 传对象 | `ApiEditor` 用 `defineModel<ApiForm>()` 接表单对象并直接改它的字段；父组件换对象（选了另一个接口）时 `watch(() => form.value)` 清掉上一次的响应。vue-tsc 对 `v-if="form"` 下的 `v-model="form"` 能正确收窄 `ApiForm \| null` | 2026-10-09 |
 | 无头浏览器自查升级 | 只截图看不出按钮能不能点。用临时虚拟环境里的 Playwright（`uv venv` + `uv pip install playwright`，不进项目依赖）以 `channel="chrome"` 驱动系统 Chrome：选环境、发送、切标签、导入 cURL、试跑流程各截一张图，并收集 console 错误。Element Plus 的下拉项用 `.el-select-dropdown__item:visible` 定位 | 2026-10-09 |
 
+| 路由视图的 key 用路径 | `App.vue` 原来是 `<router-view :key="route.fullPath">`：查询参数一变整个页面就重建。接口页把选中的接口同步进 `?id=` 后，每点一个接口页面都重建一次，新建草稿时去掉 `?id=` 又被重建、按记住的 id 打开了旧接口（草稿直接消失）。改成 `route.path`：路径变（如 `/runs/A` → `/runs/B`）才重建 | 2026-10-10 |
+| 自动保存不回填表单 | 自动保存成功后只把基线换成发出去的那份快照、把列表里那一项换成返回的对象，不用返回值重建表单：保存请求在路上时用户可能还在输入，重建会吞掉这些字符。保存期间又改了就接着排下一次；同一时间只有一个保存在进行 | 2026-10-10 |
+
 ## 5. 流程与协作
 
 | 主题 | 内容 | 日期 |

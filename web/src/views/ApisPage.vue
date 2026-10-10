@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { apisApi, foldersApi, type ApiDef, type Folder } from '../api'
+import { ApiError, apisApi, foldersApi, type ApiDef, type Folder } from '../api'
 import { useResourceList } from '../composables/useResourceList'
-import { confirmAction, showError } from '../utils/feedback'
+import { confirmAction, errorMessage, showError } from '../utils/feedback'
 import { emptyForm, formProblem, fromApi, snapshot, toInput, type ApiForm } from '../utils/api-form'
 import type { CurlImport } from '../utils/curl'
 import { buildFolderTree, folderOptions, folderPath } from '../utils/folders'
@@ -90,21 +91,160 @@ const dirty = computed(() => form.value !== null && snapshot(form.value) !== bas
 /** 正在新建时，新接口在树里的位置（跟着表单里的所属文件夹走） */
 const draftFolderId = computed<number | null | undefined>(() => (isNew.value ? (form.value?.folderId ?? null) : undefined))
 
-// 列表第一次加载完成时自动打开第一个，页面打开就有东西可看
+// 上次打开的接口：地址里的 ?id= 优先，其次是本地记录，都没有（或已被删除）时打开第一个
+const route = useRoute()
+const router = useRouter()
+const LAST_KEY = 'perf-console.apis.lastId'
+function readLast(): number | null {
+  try {
+    const id = Number(localStorage.getItem(LAST_KEY))
+    return Number.isInteger(id) && id > 0 ? id : null
+  } catch {
+    return null
+  }
+}
+function writeLast(id: number): void {
+  try {
+    localStorage.setItem(LAST_KEY, String(id))
+  } catch {
+    // 存不了只是下次不能回到这里
+  }
+}
+const queryId = (): number | null => {
+  const id = Number(route.query.id)
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+function syncQuery(id: number | null): void {
+  const query = { ...route.query }
+  if (id === null) delete query.id
+  else query.id = String(id)
+  if (query.id !== route.query.id) void router.replace({ query })
+}
+
 watch(items, (list) => {
-  if (form.value === null && selectedId.value === null && list.length > 0) open(list[0])
+  if (form.value !== null || selectedId.value !== null || list.length === 0) return
+  const wanted = queryId() ?? readLast()
+  open(list.find((a) => a.id === wanted) ?? list[0])
+})
+// 在页面上时地址里的 id 变了：粘贴了另一个接口的链接就打开它；点侧栏菜单回到 /apis 时把当前接口补回地址
+watch(queryId, (id) => {
+  if (id === null) {
+    if (selectedId.value !== null) syncQuery(selectedId.value)
+    return
+  }
+  const api = items.value.find((a) => a.id === id)
+  if (!api || api.id === selectedId.value) return
+  // 放弃修改时选了"取消"，地址要回到还在编辑的接口
+  void select(api).then(() => {
+    if (selectedId.value !== null && selectedId.value !== queryId()) syncQuery(selectedId.value)
+  })
 })
 
 function open(api: ApiDef): void {
+  cancelAutoSave()
   selectedId.value = api.id
   form.value = fromApi(api)
   baseline.value = snapshot(form.value)
+  writeLast(api.id)
+  syncQuery(api.id)
 }
 
+// ---- 自动保存：已保存的接口改动后停顿一会儿就保存；新接口还没有名字，仍然手动保存 ----
+const AUTO_SAVE_DELAY_MS = 800
+const saveStatus = ref<'saving' | 'saved' | 'error' | null>(null)
+const saveError = ref('')
+let timer: number | undefined
+let inflight: Promise<boolean> | null = null
+
+function cancelAutoSave(): void {
+  window.clearTimeout(timer)
+  saveStatus.value = null
+  saveError.value = ''
+}
+function localProblem(f: ApiForm): string | null {
+  const input = toInput(f)
+  if (!input.name) return '请填写接口名称'
+  if (!input.path.startsWith('/')) return '路径必须以 / 开头'
+  return formProblem(f)
+}
+function failure(e: unknown): string {
+  return e instanceof ApiError && e.details.length > 0 ? e.details.join('；') : errorMessage(e)
+}
+
+watch(
+  form,
+  () => {
+    if (selectedId.value === null || !dirty.value) return
+    window.clearTimeout(timer)
+    timer = window.setTimeout(() => void autoSave(), AUTO_SAVE_DELAY_MS)
+  },
+  { deep: true },
+)
+
+/** 把当前接口的改动存下来；没有改动也算成功。同一时间只有一个保存在进行。 */
+async function autoSave(): Promise<boolean> {
+  window.clearTimeout(timer)
+  if (inflight) await inflight
+  if (form.value === null || selectedId.value === null || !dirty.value) return true
+  const problem = localProblem(form.value)
+  if (problem) {
+    saveStatus.value = 'error'
+    saveError.value = problem
+    return false
+  }
+  const id = selectedId.value
+  const sent = snapshot(form.value)
+  const input = toInput(form.value)
+  saveStatus.value = 'saving'
+  inflight = (async () => {
+    try {
+      const saved = await apisApi.update(id, input)
+      // 列表里换成新的，树上的名称、路径、所属文件夹跟着变；表单不动，保存期间继续输入的内容不会被覆盖
+      items.value = items.value.map((a) => (a.id === saved.id ? saved : a))
+      if (selectedId.value === id) {
+        baseline.value = sent
+        saveStatus.value = 'saved'
+        saveError.value = ''
+      }
+      return true
+    } catch (e) {
+      if (selectedId.value === id) {
+        saveStatus.value = 'error'
+        saveError.value = failure(e)
+      }
+      return false
+    }
+  })()
+  const ok = await inflight
+  inflight = null
+  // 保存期间又改了：接着排下一次
+  if (ok && selectedId.value === id && dirty.value) {
+    timer = window.setTimeout(() => void autoSave(), AUTO_SAVE_DELAY_MS)
+  }
+  return ok
+}
+
+/** 离开当前接口之前：已保存的接口先把改动存下来，存不了再问；新接口没保存就问要不要放弃。 */
 async function guard(): Promise<boolean> {
   if (!dirty.value) return true
-  return confirmAction('当前接口有未保存的修改，放弃这些修改吗？', '未保存的修改', true)
+  if (selectedId.value !== null) {
+    if (await autoSave()) return true
+    return confirmAction(`当前接口的修改没能保存：${saveError.value}。放弃这些修改吗？`, '未保存的修改', true)
+  }
+  return confirmAction('新接口还没有保存，放弃吗？', '未保存的修改', true)
 }
+
+onBeforeRouteLeave(() => guard())
+function onBeforeUnload(e: BeforeUnloadEvent): void {
+  if (!dirty.value) return
+  if (selectedId.value !== null) void autoSave()
+  e.preventDefault()
+}
+onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  window.clearTimeout(timer)
+})
 
 async function select(api: ApiDef): Promise<void> {
   if (api.id === selectedId.value) return
@@ -112,11 +252,18 @@ async function select(api: ApiDef): Promise<void> {
   open(api)
 }
 
+function startDraft(draft: ApiForm, base: string): void {
+  cancelAutoSave()
+  selectedId.value = null
+  form.value = draft
+  baseline.value = base
+  syncQuery(null)
+}
+
 async function create(folderId: number | null): Promise<void> {
   if (!(await guard())) return
-  selectedId.value = null
-  form.value = emptyForm(folderId)
-  baseline.value = snapshot(form.value)
+  const draft = emptyForm(folderId)
+  startDraft(draft, snapshot(draft))
 }
 
 async function duplicate(): Promise<void> {
@@ -124,9 +271,7 @@ async function duplicate(): Promise<void> {
   if (!(await guard())) return
   const copy = fromApi(toInput(form.value))
   copy.name = `${copy.name}（副本）`
-  selectedId.value = null
-  form.value = copy
-  baseline.value = '' // 副本一开始就算有改动，提醒保存
+  startDraft(copy, '') // 副本一开始就算有改动，提醒保存
 }
 
 const importFolderId = ref<number | null>(null)
@@ -136,14 +281,17 @@ function openImport(folderId: number | null): void {
 }
 async function onImported(result: CurlImport): Promise<void> {
   if (!(await guard())) return
-  selectedId.value = null
-  form.value = fromApi({ ...result.input, folderId: importFolderId.value })
-  baseline.value = ''
+  startDraft(fromApi({ ...result.input, folderId: importFolderId.value }), '')
   ElMessage.success(`已填入 ${result.input.method} ${result.input.path}，改好名字后保存`)
 }
 
 async function save(): Promise<void> {
   if (!form.value) return
+  // 已保存的接口：立即保存（Ctrl + S），结果显示在名称旁边
+  if (selectedId.value !== null) {
+    await autoSave()
+    return
+  }
   const input = toInput(form.value)
   if (!input.name) {
     ElMessage.warning('请填写接口名称')
@@ -160,7 +308,7 @@ async function save(): Promise<void> {
   }
   saving.value = true
   try {
-    const saved = selectedId.value === null ? await apisApi.create(input) : await apisApi.update(selectedId.value, input)
+    const saved = await apisApi.create(input)
     ElMessage.success('已保存')
     await load()
     open(saved)
@@ -177,9 +325,11 @@ async function del(): Promise<void> {
   await remove(api)
   // 被流程引用时删除会被拒绝（409），列表里还在；真删掉了才清空右栏
   if (!items.value.some((a) => a.id === api.id)) {
+    cancelAutoSave()
     selectedId.value = null
     form.value = null
     if (items.value.length > 0) open(items.value[0])
+    else syncQuery(null)
   }
 }
 </script>
@@ -214,6 +364,8 @@ async function del(): Promise<void> {
           :is-new="isNew"
           :dirty="dirty"
           :saving="saving"
+          :save-status="saveStatus"
+          :save-error="saveError"
           :folder-options="folderSelectOptions"
           :producers="producers"
           @save="save"
