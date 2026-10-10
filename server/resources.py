@@ -157,27 +157,6 @@ def _guard_folder_delete(folder_id: int, conn: sqlite3.Connection) -> None:
         raise conflict("该文件夹不是空的，不能删除。请先把里面的内容移走或删除", used)
 
 
-def _guard_api_delete(api_id: int, conn: sqlite3.Connection) -> None:
-    used = []
-    for flow in list_objs(conn, FLOWS):
-        where = [label for key, label in (("initSteps", "初始化段"), ("steps", "步骤"))
-                 if any(step.get("apiId") == api_id for step in flow[key])]
-        if where:
-            used.append(f"业务流程“{flow['name']}”（#{flow['id']}）的{'和'.join(where)}")
-    if used:
-        raise conflict("该接口正被业务流程引用，不能删除。请先从这些流程中移除它", used)
-
-
-def _guard_flow_delete(flow_id: int, conn: sqlite3.Connection) -> None:
-    used = [
-        f"测试“{test['name']}”（#{test['id']}）"
-        for test in list_objs(conn, TESTS)
-        if any(item.get("flowId") == flow_id for item in test["flows"])
-    ]
-    if used:
-        raise conflict("该业务流程正被测试引用，不能删除。请先从这些测试中移除它", used)
-
-
 ENVIRONMENTS = Resource(
     name="environments",
     label="被测环境",
@@ -222,7 +201,6 @@ APIS = Resource(
     ),
     validate=validators.validate_api,
     decorate=_decorate_apis,
-    guard_delete=_guard_api_delete,
 )
 
 FLOWS = Resource(
@@ -239,7 +217,6 @@ FLOWS = Resource(
     ),
     validate=validators.validate_flow,
     decorate=_decorate_flows,
-    guard_delete=_guard_flow_delete,
 )
 
 PROFILES = Resource(

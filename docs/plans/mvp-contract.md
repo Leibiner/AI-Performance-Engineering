@@ -65,7 +65,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 |---|---|---|
 | 400 | `VALIDATION_FAILED` | 字段缺失或格式错误 |
 | 404 | `NOT_FOUND` | 资源不存在 |
-| 409 | `CONFLICT` | 已有运行在进行中；被引用的资源不能删除；已存档的运行不能删除 |
+| 409 | `CONFLICT` | 已有运行在进行中；非空的文件夹不能删除；已存档的运行不能删除 |
 | 413 | `PAYLOAD_TOO_LARGE` | 请求体超过 32 MiB（2026-10-10 加入；数据集和文件本身的上限是 10 MiB，见 §3.6、§3.7） |
 | 422 | `PREFLIGHT_REJECTED` | 预检不通过（`details` 逐条列出原因） |
 | 500 | `INTERNAL` | 其他 |
@@ -140,7 +140,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   - `header`：`expr` 是响应头名称，不区分大小写
   - `cookie`（2026-10-10 加入）：`expr` 是 Cookie 名称。先找这次响应（最后一跳）设置的 Cookie，没有再在这个流程正在用的 Cookie 罐里找：先按这次请求的地址，再按重定向后的最终地址
   - 取到的值是对象或数组时存成 JSON 字符串；取不到（含 `null`）算提取失败
-- `usedBy`（2026-10-10 加入，只读，`PUT` 时忽略）：引用了这个接口的业务流程，`[{ "flowId": 1, "flowName": "访问首页", "initSteps": [], "steps": [1], "onlyThisApi": true }]`。`initSteps` / `steps` 是它在初始化段 / 每次迭代里是第几步（从 1 开始）；`onlyThisApi` 表示这个流程的步骤全是这个接口，删掉它流程就空了。接口被引用时删除返回 409（见下文"业务流程"）
+- `usedBy`（2026-10-10 加入，只读，`PUT` 时忽略）：引用了这个接口的业务流程，`[{ "flowId": 1, "flowName": "访问首页", "initSteps": [], "steps": [1], "onlyThisApi": true }]`。`initSteps` / `steps` 是它在初始化段 / 每次迭代里是第几步（从 1 开始）；`onlyThisApi` 表示这个流程的步骤全是这个接口。接口被引用时也可以删除，引用它的步骤变成失效引用（见下文「失效引用」）
 
 **业务流程 `/api/flows`**
 
@@ -165,7 +165,13 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   - 同一流程绑定的多个数据集，列名不能重复
 - `variables`（2026-10-10 加入，省略时为 `[]`）：**流程变量**，每次迭代开始时（取完数据集的行之后、初始化段之前）按顺序求值一次，`value` 里可以引用环境变量、数据集的列、前面的流程变量和动态变量。用途：同一次迭代里多个步骤共用一个生成的值（例如订单号）。`name` 符合变量名规则、不能重复、不能和绑定的数据集的列重名
 - `GET` 返回时 `steps` 和 `initSteps` 的每项额外带 `apiName`、`method`、`path`；`datasets` 的每项额外带 `datasetName`、`columns`、`rowCount`；另带 `usedBy`：引用了这个流程的测试 `[{ "testId": 1, "testName": "百度首页冒烟", "onlyThisFlow": true }]`，`onlyThisFlow` 表示测试里只有这一个流程（都是只读的展示字段，`PUT` 时忽略）
-- 接口被流程引用（`steps` 或 `initSteps`）时不能删除（409）；数据集被流程绑定时不能删除（409）
+- **失效引用**（2026-10-10 起；之前是被引用就 409 不能删除）：每个定义都可以单独删除，被引用不挡删除，引用它的地方变成失效引用，不级联删除任何东西：
+  - 接口被删除：流程里引用它的步骤保留原 `apiId`，`GET` 时这一步的 `apiName`、`method`、`path` 为 `null`
+  - 数据集被删除：流程里的绑定保留原 `datasetId`，`datasetName`、`columns`、`rowCount` 为 `null`
+  - 业务流程被删除：测试里的这一项保留原 `flowId`，`flowName` 为 `null`
+  - 文件被删除：接口 `form` 里的文件项保留原 `fileId`（接口本身没有展示字段，页面按文件列表判断）
+  - 保存（`PUT`）时，库里原来就有的失效引用可以原样保留，不因为改别的字段而被拒绝；**新增**的引用仍然必须指向存在的对象（`POST` 时所有引用都必须存在）
+  - 带失效引用的流程、测试不能试跑和运行：预检（§3.2 第 1 条、§3.5）逐条指出哪一步、哪一项已被删除，以及怎么修；接口的 form-data 引用了已删除的文件时不能发送。运行记录不受影响（快照）
 
 **变量**（2026-10-10 整理，ADR-006）
 
@@ -232,7 +238,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 - `flows[].weight`：正数，后端不要求和为 1，组装 plan 时归一化
 - `slo` 各字段可为 `null`（表示不设该项）
 - `GET` 返回时每个 flow 额外带 `flowName`；另带 `lastRun: { runId, verdict, startedAt } | null`
-- 流程被测试引用时不能删除（409）；测试、负载配置、环境有运行记录时可以删除（运行里存了快照）
+- 流程被测试引用时也可以删除，测试里的这一项变成失效引用（见上文「失效引用」）；测试、负载配置、环境有运行记录时可以删除（运行里存了快照）
 
 ### 3.2 运行 `/api/runs`
 
@@ -282,7 +288,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 **预检**（`POST /api/runs` 时执行，不通过返回 422）：
 
-1. 测试、负载配置、环境都存在；测试至少有 1 个流程，每个流程至少有 1 个步骤
+1. 测试、负载配置、环境都存在；测试至少有 1 个流程，每个流程至少有 1 个步骤；测试里的流程、流程里的步骤和数据集绑定都没有失效引用（引用的对象已被删除，见 §3.1「失效引用」），否则逐条指出是哪一项、怎么修
 2. 环境的 `baseUrl` 是合法的 http / https 地址
 3. 负载配置不超过被测环境的安全上限（只检查不为 `null` 的项）：并发（`vus` 或 `preAllocatedVus`）≤ `maxVus`；到达率（`rate`、`startRate`、各 stage 的 `target`）≤ `maxRate`；总时长 ≤ `maxDurationSec`。被测环境类型为 `prod` 时，请求里必须带 `"confirmProd": true`
 4. 负载配置属于 §3.1 的四种形态之一
@@ -465,7 +471,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 | `POST /api/datasets` | 新建。body：`{ "name", "note", "csv": "…" }` 或 `{ "name", "note", "contentBase64": "…", "fileName": "users.csv" }`，`csv` 和 `contentBase64` 恰好给一个。返回 201 和对象 |
 | `GET /api/datasets/:id` | 详情：对象 + `previewRows`（前 100 行，每行是字符串数组，顺序同 `columns`）。POST、PUT 的响应同详情 |
 | `PUT /api/datasets/:id` | 整体替换 `name`、`note`；`csv` / `contentBase64` 可以都不给，表示数据不变（只改名或备注）；给了就整体替换数据 |
-| `DELETE /api/datasets/:id` | 被业务流程绑定时返回 409，`details` 列出这些流程 |
+| `DELETE /api/datasets/:id` | 删除。被业务流程绑定时也可以删除，那些绑定变成失效引用（§3.1「失效引用」） |
 | `GET /api/datasets/:id/csv` | 导出 CSV：UTF-8 带 BOM（Excel 能直接打开）、逗号分隔、`\r\n` 换行，`Content-Type: text/csv; charset=utf-8`。加 `?download=1` 时作为附件下载（文件名为数据集名称 + `.csv`）。页面拿它做文本编辑时要去掉开头的 BOM |
 | `POST /api/datasets/preview` | 只解析不保存：body 同 POST 的数据部分（`csv` 或 `contentBase64` + `fileName`），返回 200 `{ "columns", "rowCount", "previewRows", "source" }`；解析不通过返回 400，`details` 和保存时一致 |
 
@@ -501,7 +507,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 | `GET /api/files/:id` | 元数据 |
 | `GET /api/files/:id/content` | 文件内容，`Content-Type` 为文件的 `contentType`；加 `?download=1` 时作为附件下载 |
 | `PUT /api/files/:id` | 改 `name`、`contentType`、`note`；`contentBase64` 可省略（内容不变），给了就替换内容 |
-| `DELETE /api/files/:id` | 被接口引用时返回 409，`details` 列出这些接口 |
+| `DELETE /api/files/:id` | 删除。被接口引用时也可以删除，那些文件项变成失效引用（§3.1「失效引用」） |
 
 ```json
 {

@@ -78,7 +78,7 @@ export const datasetsApi = {
   create: (input: DatasetInput) => request<Dataset>('POST', '/datasets', { body: input }),
   /** 不带 csv / contentBase64 时数据不变 */
   update: (id: number, input: DatasetInput) => request<Dataset>('PUT', `/datasets/${id}`, { body: input }),
-  /** 被业务流程绑定时 409，details 列出这些流程 */
+  /** 被业务流程绑定也能删，那些绑定变成失效绑定 */
   remove: async (id: number) => {
     await request<unknown>('DELETE', `/datasets/${id}`)
   },
@@ -95,7 +95,7 @@ export const filesApi = {
   create: (input: FileAssetInput) => request<FileAsset>('POST', '/files', { body: input }),
   /** 不带 contentBase64 时内容不变 */
   update: (id: number, input: FileAssetInput) => request<FileAsset>('PUT', `/files/${id}`, { body: input }),
-  /** 被接口引用时 409，details 列出这些接口 */
+  /** 被接口引用也能删，那些文件项变成失效引用 */
   remove: async (id: number) => {
     await request<unknown>('DELETE', `/files/${id}`)
   },

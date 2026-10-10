@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body
 from fastapi.responses import Response
 
 from . import db
-from .errors import bad_request, conflict, not_found
+from .errors import bad_request, not_found
 from .files import attachment, decode_base64, fmt_size
 from .validators import VAR_NAME_RULE, Checker, is_int, is_var_name
 
@@ -354,12 +354,7 @@ def delete_dataset(item_id: int):
     with db.connect() as conn:
         if conn.execute("SELECT 1 FROM datasets WHERE id = ?", (item_id,)).fetchone() is None:
             raise not_found(f"数据集 #{item_id} 不存在")
-        used = _usage(conn).get(item_id) or []
-        if used:
-            raise conflict(
-                "该数据集正被业务流程绑定，不能删除。请先在这些流程里解除绑定",
-                [f"业务流程“{u['flowName']}”（#{u['flowId']}）" for u in used],
-            )
+        # 被流程绑定也可以删：那些绑定变成失效绑定，流程在修好之前不能试跑和运行（契约 §3.6）
         conn.execute("DELETE FROM datasets WHERE id = ?", (item_id,))
     return {"ok": True}
 

@@ -17,7 +17,7 @@ from fastapi import APIRouter, Body
 from fastapi.responses import Response
 
 from . import db
-from .errors import conflict, not_found
+from .errors import not_found
 from .validators import Checker, is_int
 
 MAX_BYTES = 10 * 1024 * 1024
@@ -164,7 +164,7 @@ def load_for_steps(conn, apis: list[dict]) -> tuple[dict[int, dict], list[str]]:
     problems: list[str] = []
     for api, file_id in wanted:
         if file_id not in loaded:
-            problem = f"接口“{api['name']}”的 form-data 请求体引用的文件 #{file_id} 不存在"
+            problem = f"接口“{api['name']}”的 form-data 请求体引用的文件 #{file_id} 已被删除（失效文件项）：在接口里重新选择文件"
             if problem not in problems:
                 problems.append(problem)
     return loaded, problems
@@ -253,12 +253,7 @@ def delete_file(item_id: int):
     with db.connect() as conn:
         if conn.execute("SELECT 1 FROM files WHERE id = ?", (item_id,)).fetchone() is None:
             raise not_found(f"文件 #{item_id} 不存在")
-        used = _usage(conn).get(item_id) or []
-        if used:
-            raise conflict(
-                "该文件正被接口引用，不能删除。请先从这些接口的表单里移除它",
-                [f"接口“{u['apiName']}”（#{u['apiId']}）" for u in used],
-            )
+        # 被接口引用也可以删：那些文件项变成失效引用，接口在修好之前不能以 form-data 发送（契约 §3.7）
         conn.execute("DELETE FROM files WHERE id = ?", (item_id,))
     return {"ok": True}
 

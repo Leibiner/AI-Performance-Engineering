@@ -54,7 +54,7 @@ function onFileListOpen(open: boolean): void {
   if (open) void refreshFiles()
 }
 function missingFileLabel(id: number): string {
-  return filesLoaded.value ? `文件 #${id}（不存在）` : `文件 #${id}`
+  return filesLoaded.value ? `文件已删除（#${id}）` : `文件 #${id}`
 }
 
 const uploadInput = ref<HTMLInputElement>()

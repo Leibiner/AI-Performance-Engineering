@@ -8,7 +8,7 @@ import { confirmAction, errorMessage, showError } from '../utils/feedback'
 import { emptyForm, formProblem, fromApi, snapshot, toInput, type ApiForm } from '../utils/api-form'
 import type { CurlImport } from '../utils/curl'
 import { buildFolderTree, folderOptions, folderPath } from '../utils/folders'
-import { showApiInUse } from '../utils/dependencies'
+import { confirmDeleteApi } from '../utils/dependencies'
 import { useApiIndex } from '../composables/useApiIndex'
 import PageHeader from '../components/PageHeader.vue'
 import ApiList from '../components/apis/ApiList.vue'
@@ -324,7 +324,8 @@ async function save(): Promise<void> {
 async function del(): Promise<void> {
   const api = items.value.find((a) => a.id === selectedId.value)
   if (!api) return
-  // 被流程引用时不去试删除：直接列出整条依赖链和处理顺序
+  // 被流程引用也可以删：先列出会失效的步骤，确认后只删这个接口
+  let confirmed = false
   try {
     const fresh = await apisApi.get(api.id)
     if (fresh.usedBy?.length) {
@@ -334,14 +335,14 @@ async function del(): Promise<void> {
       } catch {
         // 拿不到测试的引用也照样列出流程
       }
-      showApiInUse(router, fresh.name, fresh.usedBy, testsOf)
-      return
+      if (!(await confirmDeleteApi(router, fresh.name, fresh.usedBy, testsOf))) return
+      confirmed = true
     }
   } catch (e) {
     showError(e, '删除失败')
     return
   }
-  await remove(api)
+  await remove(api, confirmed)
   // 被流程引用时删除会被拒绝（409），列表里还在；真删掉了才清空右栏
   if (!items.value.some((a) => a.id === api.id)) {
     cancelAutoSave()

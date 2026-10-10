@@ -21,7 +21,8 @@ const updatedVars = ref<string[]>([])
 /** 数据集 id → 行号（界面上从 1 开始） */
 const rowNo = ref<Record<number, number>>({})
 
-const bindings = computed(() => props.flow?.datasets ?? [])
+// 已删除的数据集（失效绑定）没有行可选；试跑时后端会指出要修的地方
+const bindings = computed(() => (props.flow?.datasets ?? []).filter((b) => b.datasetName !== null))
 
 watch(visible, (open) => {
   if (open) {

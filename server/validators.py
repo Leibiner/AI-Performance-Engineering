@@ -218,6 +218,17 @@ def validate_folder(data: Any, conn: sqlite3.Connection) -> dict:
     return out
 
 
+def _stored(conn: sqlite3.Connection, table: str, columns: str, data: dict) -> sqlite3.Row | None:
+    """PUT 时这条定义在库里原来的样子（路由把路径上的 id 放进了请求体）；新建时为 None。
+
+    定义之间的引用可以失效（被引用的接口、流程、数据集、文件删掉了也不挡删除，契约 §3.1）：
+    已经失效的引用保存时原样保留，不因为别的字段的修改而被拒绝；新增的引用仍然必须指向存在的对象。"""
+    own = data.get("id")
+    if not is_int(own):
+        return None
+    return conn.execute(f"SELECT {columns} FROM {table} WHERE id = ?", (own,)).fetchone()
+
+
 def validate_api(data: Any, conn: sqlite3.Connection) -> dict:
     c = Checker(data)
     out: dict[str, Any] = {"name": c.name()}
@@ -253,7 +264,12 @@ def validate_api(data: Any, conn: sqlite3.Connection) -> dict:
         c.err("body 必须是字符串或 null")
         body = None
     out["body"] = body or None
-    out["form"] = _form_items(c, conn, data.get("form"), body_type)
+    stored = _stored(conn, "apis", "form", c.data)
+    kept_files = {
+        item.get("fileId") for item in (json.loads(stored["form"]) if stored else [])
+        if isinstance(item, dict) and item.get("type") == "file"
+    }
+    out["form"] = _form_items(c, conn, data.get("form"), body_type, kept_files)
 
     status = data.get("expectStatus", 200)
     if not is_int(status) or not 100 <= status <= 599:
@@ -302,7 +318,7 @@ def validate_api(data: Any, conn: sqlite3.Connection) -> dict:
     return out
 
 
-def _form_items(c: Checker, conn: sqlite3.Connection, items: Any, body_type: str) -> list[dict]:
+def _form_items(c: Checker, conn: sqlite3.Connection, items: Any, body_type: str, kept_files: set) -> list[dict]:
     """接口的表单项（契约 §3.1 form）。文本项的 fileId 规范成 null，文件项的 value 规范成空串。
 
     bodyType 为 raw 时表单只是为了切换类型不丢内容而保留，不发送，所以不要求填完整：名称可以为空，文件项可以还没选文件。"""
@@ -355,7 +371,7 @@ def _form_items(c: Checker, conn: sqlite3.Connection, items: Any, body_type: str
         marks = ", ".join("?" for _ in ids)
         known = {row[0] for row in conn.execute(f"SELECT id FROM files WHERE id IN ({marks})", ids)}
         for i, file_id in wanted:
-            if file_id not in known:
+            if file_id not in known and file_id not in kept_files:
                 c.err(f"form 第 {i} 项引用的文件 #{file_id} 不存在")
     return out
 
@@ -391,7 +407,7 @@ def _flow_steps(c: Checker, raw: Any, key: str, label: str, known: set[int]) -> 
     return out
 
 
-def _flow_datasets(c: Checker, conn: sqlite3.Connection, raw: Any) -> tuple[list[dict], dict[str, str]]:
+def _flow_datasets(c: Checker, conn: sqlite3.Connection, raw: Any, kept: set) -> tuple[list[dict], dict[str, str]]:
     """绑定的数据集。返回 (规范化的绑定, 列名 → 所属数据集的名称)。"""
     if raw is None:
         return [], {}
@@ -415,12 +431,15 @@ def _flow_datasets(c: Checker, conn: sqlite3.Connection, raw: Any) -> tuple[list
         if not is_int(ds_id):
             c.err(f"{where}的 datasetId 必填，且必须是整数")
             ok = False
-        elif ds_id not in known:
-            c.err(f"{where}引用的数据集 #{ds_id} 不存在")
-            ok = False
         elif ds_id in seen:
-            c.err(f"数据集“{known[ds_id]['name']}”重复绑定：同一流程里每个数据集只能绑定一次")
+            c.err(f"数据集 #{ds_id} 重复绑定：同一流程里每个数据集只能绑定一次")
             ok = False
+        elif ds_id not in known:
+            if ds_id in kept:
+                seen.add(ds_id)  # 已被删除的数据集：失效绑定原样保留，没有列可查
+            else:
+                c.err(f"{where}引用的数据集 #{ds_id} 不存在")
+                ok = False
         else:
             row = known[ds_id]
             seen.add(ds_id)
@@ -486,8 +505,11 @@ def _flow_variables(c: Checker, raw: Any, owners: dict[str, str]) -> list[dict]:
 def validate_flow(data: Any, conn: sqlite3.Connection) -> dict:
     c = Checker(data)
     out: dict[str, Any] = {"name": c.name(), "note": c.note()}
-    known = {row[0] for row in conn.execute("SELECT id FROM apis")}
-    out["datasets"], owners = _flow_datasets(c, conn, data.get("datasets"))
+    stored = _stored(conn, "flows", "init_steps, steps, datasets", c.data)
+    kept_apis = {step.get("apiId") for step in (json.loads(stored["init_steps"]) + json.loads(stored["steps"]) if stored else [])}
+    kept_datasets = {b.get("datasetId") for b in (json.loads(stored["datasets"]) if stored else [])}
+    known = {row[0] for row in conn.execute("SELECT id FROM apis")} | kept_apis
+    out["datasets"], owners = _flow_datasets(c, conn, data.get("datasets"), kept_datasets)
     out["variables"] = _flow_variables(c, data.get("variables"), owners)
     raw_init = data.get("initSteps")
     out["initSteps"] = _flow_steps(c, raw_init, "initSteps", f"{INIT_LABEL}步骤", known)
@@ -608,7 +630,9 @@ def validate_test(data: Any, conn: sqlite3.Connection) -> dict:
     if not isinstance(flows, list):
         c.err("flows 必须是数组")
     else:
-        known = {row[0] for row in conn.execute("SELECT id FROM flows")}
+        stored = _stored(conn, "tests", "flows", c.data)
+        kept = {item.get("flowId") for item in (json.loads(stored["flows"]) if stored else [])}
+        known = {row[0] for row in conn.execute("SELECT id FROM flows")} | kept
         for i, item in enumerate(flows, 1):
             if not isinstance(item, dict):
                 c.err(f"flows 第 {i} 项必须是对象")

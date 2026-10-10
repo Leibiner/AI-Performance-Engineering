@@ -52,7 +52,9 @@ def expand_flow(conn, flow: dict, weight: float, details: list[str], cache: dict
         for index, step in enumerate(items, 1):
             api = get_obj(conn, APIS, step["apiId"])
             if api is None:
-                details.append(f"业务流程“{name}”{label}第 {index} 步引用的接口 #{step['apiId']} 不存在")
+                details.append(
+                    f"业务流程“{name}”{label}第 {index} 步引用的接口 #{step['apiId']} 已被删除（失效步骤）：在流程里换一个接口，或移除这一步"
+                )
                 complete = False
                 continue
             out.append((api, step["thinkTimeMs"]))
@@ -66,7 +68,7 @@ def expand_flow(conn, flow: dict, weight: float, details: list[str], cache: dict
     for binding in wanted:
         ds = loaded.get(binding["datasetId"])
         if ds is None:
-            details.append(f"业务流程“{name}”绑定的数据集 #{binding['datasetId']} 不存在")
+            details.append(f"业务流程“{name}”绑定的数据集 #{binding['datasetId']} 已被删除（失效绑定）：在流程里换一个数据集，或解除绑定")
             complete = False
             continue
         bindings.append({"dataset": ds, "pick": binding["pick"], "onExhausted": binding["onExhausted"]})

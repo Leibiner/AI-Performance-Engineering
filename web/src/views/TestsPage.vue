@@ -64,6 +64,8 @@ function emptyForm(): FormState {
 
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
+/** 编辑中的测试里引用了已删除流程的 id（后端返回 flowName 为 null） */
+const missingFlowIds = ref<Set<number>>(new Set())
 const saving = ref(false)
 const formRef = ref<FormInstance>()
 const form = reactive<FormState>(emptyForm())
@@ -87,6 +89,7 @@ function openCreate(): void {
 
 function openEdit(row: TestDef): void {
   editingId.value = row.id
+  missingFlowIds.value = new Set((row.flows ?? []).filter((f) => f.flowName === null).map((f) => f.flowId))
   Object.assign(form, {
     name: row.name,
     note: row.note ?? '',
@@ -152,11 +155,12 @@ async function save(): Promise<void> {
   }
 }
 
-function flowShares(test: TestDef): { name: string; share: string }[] {
+function flowShares(test: TestDef): { name: string; share: string; missing: boolean }[] {
   const list = test.flows ?? []
   const total = list.reduce((sum, f) => sum + f.weight, 0)
   return list.map((f) => ({
-    name: f.flowName ?? `流程 #${f.flowId}`,
+    name: f.flowName ?? `流程已删除（#${f.flowId}）`,
+    missing: f.flowName === null,
     share: total > 0 ? formatPercent(f.weight / total, 1) : '',
   }))
 }
@@ -183,7 +187,7 @@ function openRun(row: TestDef): void {
         <el-table-column label="业务流程（占比）" min-width="200">
           <template #default="{ row }">
             <div v-for="(f, index) in flowShares(row as TestDef)" :key="index">
-              {{ f.name }} <span class="muted num">{{ f.share }}</span>
+              <span :class="{ 'is-missing': f.missing }">{{ f.name }}</span> <span class="muted num">{{ f.share }}</span>
             </div>
           </template>
         </el-table-column>
@@ -240,12 +244,17 @@ function openRun(row: TestDef): void {
             <div v-for="(item, index) in form.flows" :key="index" class="row-item">
               <el-select
                 v-model="item.flowId"
-                class="grow"
+                :class="['grow', { 'is-missing': item.flowId !== undefined && missingFlowIds.has(item.flowId) && !flows.some((f) => f.id === item.flowId) }]"
                 filterable
                 placeholder="选择业务流程"
                 no-data-text="还没有业务流程，请先到“业务流程”页面新建"
               >
                 <el-option v-for="flow in flows" :key="flow.id" :label="flow.name" :value="flow.id" />
+                <el-option
+                  v-if="item.flowId !== undefined && missingFlowIds.has(item.flowId) && !flows.some((f) => f.id === item.flowId)"
+                  :value="item.flowId"
+                  :label="`流程已删除（#${item.flowId}）`"
+                />
               </el-select>
               <el-input-number v-model="item.weight" :min="0" :step="1" controls-position="right" style="width: 150px" />
               <span class="muted num" style="width: 70px">{{ share(item.weight) }}</span>
@@ -300,6 +309,16 @@ function openRun(row: TestDef): void {
 </template>
 
 <style scoped>
+.is-missing {
+  color: var(--el-color-danger);
+  text-decoration: line-through;
+}
+.el-select.is-missing {
+  text-decoration: none;
+}
+.el-select.is-missing :deep(.el-select__wrapper) {
+  box-shadow: 0 0 0 1px var(--el-color-danger) inset;
+}
 .last-run {
   display: inline-flex;
   flex-wrap: wrap;

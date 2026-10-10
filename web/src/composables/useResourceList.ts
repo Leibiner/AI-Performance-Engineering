@@ -22,9 +22,9 @@ export function useResourceList<T extends { id: number; name: string }, TInput>(
     }
   }
 
-  async function remove(row: T): Promise<void> {
-    const ok = await confirmAction(`确定删除${label}「${row.name}」吗？`, `删除${label}`, true)
-    if (!ok) return
+  /** confirmed：调用方已经确认过（例如在影响提示里点了删除），不再弹确认框 */
+  async function remove(row: T, confirmed = false): Promise<void> {
+    if (!confirmed && !(await confirmAction(`确定删除${label}「${row.name}」吗？`, `删除${label}`, true))) return
     try {
       await api.remove(row.id)
       ElMessage.success('已删除')

@@ -1,12 +1,32 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { datasetsApi, type Dataset } from '../../api'
 import { useResourceList } from '../../composables/useResourceList'
+import { confirmDeleteDataset } from '../../utils/dependencies'
+import { showError } from '../../utils/feedback'
 import { formatCount, formatTime } from '../../utils/format'
 import { describeSource } from '../../utils/test-data'
 import DatasetDialog from './DatasetDialog.vue'
 
 const { items, loading, load, remove } = useResourceList(datasetsApi, '数据集')
+const router = useRouter()
+
+/** 被流程绑定也可以删：先列出会失效的绑定，确认后只删这个数据集 */
+async function del(row: Dataset): Promise<void> {
+  let confirmed = false
+  try {
+    const fresh = await datasetsApi.get(row.id)
+    if (fresh.usedBy.length) {
+      if (!(await confirmDeleteDataset(router, fresh.name, fresh.usedBy))) return
+      confirmed = true
+    }
+  } catch (e) {
+    showError(e, '删除失败')
+    return
+  }
+  await remove(row, confirmed)
+}
 
 const MAX_TAGS = 6
 const dialogVisible = ref(false)
@@ -80,7 +100,7 @@ defineExpose({ openCreate })
       <template #default="{ row }">
         <el-button link type="primary" @click="openEdit(row as Dataset)">编辑</el-button>
         <el-button link type="primary" tag="a" :href="datasetsApi.csvUrl((row as Dataset).id, true)">下载</el-button>
-        <el-button link type="danger" @click="remove(row as Dataset)">删除</el-button>
+        <el-button link type="danger" @click="del(row as Dataset)">删除</el-button>
       </template>
     </el-table-column>
   </el-table>

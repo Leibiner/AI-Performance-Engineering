@@ -296,7 +296,7 @@ def _preflight(conn, test_id: int, profile_id: int, env_id: int, executor_id: in
         for item in test["flows"]:
             flow = get_obj(conn, FLOWS, item["flowId"])
             if flow is None:
-                details.append(f"测试引用的业务流程 #{item['flowId']} 不存在")
+                details.append(f"测试“{test['name']}”引用的业务流程 #{item['flowId']} 已被删除（失效）：在测试里换一个流程，或移除它")
                 continue
             spec, ok = expand_flow(conn, flow, item["weight"], details, cache)
             specs.append(spec)

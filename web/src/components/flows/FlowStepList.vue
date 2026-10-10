@@ -22,7 +22,11 @@ const props = defineProps<{
   /** 有文件夹时按文件夹分组 */
   groups: ApiGroup[] | null
   checks: (StepVars | null)[]
+  /** 引用的接口已被删除的 id（来自后端返回的流程：apiName 为 null） */
+  missing?: Set<number>
 }>()
+const isMissing = (step: StepRow): boolean =>
+  step.apiId !== undefined && !!props.missing?.has(step.apiId) && !props.apis.some((a) => a.id === step.apiId)
 const emit = defineEmits<{ add: []; move: [index: number] }>()
 
 function moveWithin(index: number, offset: -1 | 1): void {
@@ -48,7 +52,7 @@ const entries = computed(() => steps.value.map((step, index) => ({ step, index, 
         <span class="row-index">{{ index + 1 }}</span>
         <el-select
           v-model="step.apiId"
-          class="grow"
+          :class="['grow', { 'is-missing': isMissing(step) }]"
           filterable
           placeholder="选择接口"
           no-data-text="还没有接口，请先到“接口”页面新建"
@@ -61,6 +65,7 @@ const entries = computed(() => steps.value.map((step, index) => ({ step, index, 
           <template v-else>
             <el-option v-for="api in apis" :key="api.id" :label="apiLabel(api)" :value="api.id" />
           </template>
+          <el-option v-if="isMissing(step)" :value="step.apiId!" :label="`接口已删除（#${step.apiId}）`" />
         </el-select>
         <el-input-number
           v-model="step.thinkTimeMs"
@@ -114,6 +119,12 @@ const entries = computed(() => steps.value.map((step, index) => ({ step, index, 
 </template>
 
 <style scoped>
+.is-missing :deep(.el-select__wrapper) {
+  box-shadow: 0 0 0 1px var(--el-color-danger) inset;
+}
+.is-missing :deep(.el-select__selected-item) {
+  color: var(--el-color-danger);
+}
 .step-wait {
   flex-shrink: 0;
   width: 150px;

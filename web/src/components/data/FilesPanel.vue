@@ -1,13 +1,32 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { filesApi, type FileAsset } from '../../api'
 import { useResourceList } from '../../composables/useResourceList'
+import { confirmDeleteFile } from '../../utils/dependencies'
 import { showError } from '../../utils/feedback'
 import { formatBytes, formatTime } from '../../utils/format'
 import { oversizeMessage, readFileBase64 } from '../../utils/test-data'
 
 const { items, loading, load, remove } = useResourceList(filesApi, '文件')
+const router = useRouter()
+
+/** 被接口引用也可以删：先列出会失效的文件项，确认后只删这个文件 */
+async function del(row: FileAsset): Promise<void> {
+  let confirmed = false
+  try {
+    const fresh = await filesApi.get(row.id)
+    if (fresh.usedBy.length) {
+      if (!(await confirmDeleteFile(router, fresh.name, fresh.usedBy))) return
+      confirmed = true
+    }
+  } catch (e) {
+    showError(e, '删除失败')
+    return
+  }
+  await remove(row, confirmed)
+}
 
 const uploadInput = ref<HTMLInputElement>()
 const replaceInput = ref<HTMLInputElement>()
@@ -148,7 +167,7 @@ defineExpose({ pickUpload, uploading })
         <el-button link type="primary" tag="a" :href="filesApi.contentUrl((row as FileAsset).id, true)">下载</el-button>
         <el-button link type="primary" @click="pickReplace(row as FileAsset)">替换内容</el-button>
         <el-button link type="primary" @click="openEdit(row as FileAsset)">编辑</el-button>
-        <el-button link type="danger" @click="remove(row as FileAsset)">删除</el-button>
+        <el-button link type="danger" @click="del(row as FileAsset)">删除</el-button>
       </template>
     </el-table-column>
   </el-table>
