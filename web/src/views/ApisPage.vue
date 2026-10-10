@@ -9,11 +9,9 @@ import { emptyForm, formProblem, fromApi, snapshot, toInput, type ApiForm } from
 import type { CurlImport } from '../utils/curl'
 import { buildFolderTree, folderOptions, folderPath } from '../utils/folders'
 import { useApiIndex } from '../composables/useApiIndex'
-import PageHeader from '../components/PageHeader.vue'
 import ApiList from '../components/apis/ApiList.vue'
 import ApiEditor from '../components/apis/ApiEditor.vue'
 import CurlImportDialog from '../components/apis/CurlImportDialog.vue'
-import DebugEnvBar from '../components/debug/DebugEnvBar.vue'
 
 const { items, loading, load, remove } = useResourceList(apisApi, '接口', 'api')
 
@@ -339,9 +337,6 @@ async function del(): Promise<void> {
 
 <template>
   <div class="page apis-page">
-    <PageHeader>
-      <DebugEnvBar />
-    </PageHeader>
     <div class="workbench">
       <ApiList
         class="workbench-list"

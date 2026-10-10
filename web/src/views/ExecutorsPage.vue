@@ -5,7 +5,6 @@ import { Edit, Refresh } from '@element-plus/icons-vue'
 import { executorsApi, type Executor } from '../api'
 import { showError } from '../utils/feedback'
 import { DASH, formatNumber, formatTime } from '../utils/format'
-import PageHeader from '../components/PageHeader.vue'
 
 const REFRESH_MS = 3000
 
@@ -93,10 +92,6 @@ async function save(): Promise<void> {
 
 <template>
   <div v-loading="loading" class="page">
-    <PageHeader>
-      <el-button :icon="Refresh" @click="load()">刷新</el-button>
-    </PageHeader>
-
     <div v-if="!loading && items.length === 0" class="panel">
       <el-empty description="暂无执行机" />
     </div>
@@ -111,6 +106,7 @@ async function save(): Promise<void> {
         </router-link>
         <span class="executor-tools">
           <span v-if="fetchedAt" class="muted num">数据采集于 {{ formatTime(fetchedAt) }}</span>
+          <el-button :icon="Refresh" circle size="small" title="刷新" aria-label="刷新" @click="load()" />
           <el-button :icon="Edit" size="small" @click="openEdit(x)">编辑名称和备注</el-button>
         </span>
       </div>

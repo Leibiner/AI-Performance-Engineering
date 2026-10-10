@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Upload } from '@element-plus/icons-vue'
 import { filesApi, type FileAsset } from '../../api'
 import { useResourceList } from '../../composables/useResourceList'
 import UsageTag from '../refs/UsageTag.vue'
@@ -107,8 +108,6 @@ async function saveEdit(): Promise<void> {
     savingEdit.value = false
   }
 }
-
-defineExpose({ pickUpload, uploading })
 </script>
 
 <template>
@@ -141,6 +140,9 @@ defineExpose({ pickUpload, uploading })
       </template>
     </el-table-column>
     <el-table-column label="操作" width="250" fixed="right">
+      <template #header>
+        <el-button link type="primary" :icon="Upload" :loading="uploading" @click="pickUpload">上传</el-button>
+      </template>
       <template #default="{ row }">
         <el-button link type="primary" tag="a" :href="filesApi.contentUrl((row as FileAsset).id, true)">下载</el-button>
         <el-button link type="primary" @click="pickReplace(row as FileAsset)">替换内容</el-button>

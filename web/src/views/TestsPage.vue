@@ -10,7 +10,6 @@ import { brokenIds, brokenLabel } from '../utils/references'
 import BrokenTag from '../components/refs/BrokenTag.vue'
 import { formatPercent, formatTime, percentToRatio, ratioToPercent } from '../utils/format'
 import { sloItems } from '../utils/slo'
-import PageHeader from '../components/PageHeader.vue'
 import RunDialog from '../components/RunDialog.vue'
 import VerdictTag from '../components/VerdictTag.vue'
 
@@ -177,10 +176,6 @@ function openRun(row: TestDef): void {
 
 <template>
   <div class="page">
-    <PageHeader>
-      <el-button type="primary" :icon="Plus" @click="openCreate">新建测试</el-button>
-    </PageHeader>
-
     <div class="panel">
       <el-table v-loading="loading" :data="items" empty-text="暂无数据">
         <el-table-column label="名称" min-width="160">
@@ -216,6 +211,9 @@ function openRun(row: TestDef): void {
         </el-table-column>
         <el-table-column prop="note" label="备注" min-width="140" show-overflow-tooltip />
         <el-table-column label="操作" width="210" fixed="right">
+          <template #header>
+            <el-button link type="primary" :icon="Plus" @click="openCreate">新建</el-button>
+          </template>
           <template #default="{ row }">
             <el-button type="primary" size="small" :icon="VideoPlay" @click="openRun(row as TestDef)">运行</el-button>
             <el-button link type="primary" @click="openEdit(row as TestDef)">编辑</el-button>

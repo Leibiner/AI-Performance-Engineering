@@ -35,7 +35,7 @@ const width = computed(() => {
     <template #label>
       <span v-if="environment" class="env-picker-label">
         <EnvTypeTag :type="environment.type" />
-        <span class="env-picker-url">{{ environment.baseUrl }}</span>
+        <span class="env-picker-url"><bdi>{{ environment.baseUrl }}</bdi></span>
       </span>
     </template>
     <el-option v-for="e in environments" :key="e.id" :label="e.name" :value="e.id">
@@ -55,8 +55,11 @@ const width = computed(() => {
   gap: 8px;
   max-width: 100%;
 }
+/* 放不下时省略开头，留下主机和端口 */
 .env-picker-url {
   overflow: hidden;
+  direction: rtl;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

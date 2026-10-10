@@ -594,12 +594,12 @@ async function copyCurl(): Promise<void> {
   box-shadow: 0 0 0 1px var(--el-color-primary) inset;
 }
 .url-env {
-  flex-shrink: 0;
-  max-width: 48%;
+  flex: 0 1 auto;
+  min-width: 130px;
   border-right: 1px solid var(--hairline);
 }
 .url-path {
-  flex: 1;
+  flex: 1 0 200px;
   min-width: 0;
   align-self: center;
 }

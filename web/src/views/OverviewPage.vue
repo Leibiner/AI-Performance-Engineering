@@ -7,7 +7,6 @@ import { showError } from '../utils/feedback'
 import { formatCount, formatMs, formatPercent, formatTime } from '../utils/format'
 import { VERDICTS, VERDICT_ORDER } from '../utils/verdict'
 import EnvTypeTag from '../components/EnvTypeTag.vue'
-import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
 import VerdictTag from '../components/VerdictTag.vue'
 
@@ -73,10 +72,6 @@ const verdictRows = computed(() => {
 
 <template>
   <div v-loading="loading" class="page">
-    <PageHeader>
-      <el-button :icon="Refresh" @click="load()">刷新</el-button>
-    </PageHeader>
-
     <el-alert v-if="data?.runningRunId" type="info" :closable="false" show-icon class="running-alert">
       <template #title>
         有一个运行正在进行
@@ -125,7 +120,10 @@ const verdictRows = computed(() => {
       <h2 class="panel-title">
         最近的运行
         <small>最近 10 次</small>
-        <router-link class="more-link" to="/runs">全部运行</router-link>
+        <span class="panel-tools">
+          <el-button :icon="Refresh" circle size="small" title="刷新" aria-label="刷新" @click="load()" />
+          <router-link class="more-link" to="/runs">全部运行</router-link>
+        </span>
       </h2>
       <el-table :data="data?.recentRuns ?? []" empty-text="暂无运行">
         <el-table-column label="开始时间" width="170">
@@ -238,8 +236,14 @@ const verdictRows = computed(() => {
 .env-tag {
   margin-right: 6px;
 }
-.more-link {
+.panel-tools {
+  display: inline-flex;
+  align-self: center;
+  align-items: center;
+  gap: 12px;
   margin-left: auto;
+}
+.more-link {
   color: var(--el-color-primary);
   font-size: 13px;
   font-weight: 400;

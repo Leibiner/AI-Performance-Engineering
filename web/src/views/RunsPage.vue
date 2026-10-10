@@ -8,7 +8,6 @@ import { confirmAction, showError } from '../utils/feedback'
 import { formatCount, formatMs, formatPercent, formatTime } from '../utils/format'
 import { VERDICT_OPTIONS } from '../utils/verdict'
 import EnvTypeTag from '../components/EnvTypeTag.vue'
-import PageHeader from '../components/PageHeader.vue'
 import StatusTag from '../components/StatusTag.vue'
 import VerdictTag from '../components/VerdictTag.vue'
 
@@ -123,10 +122,6 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page">
-    <PageHeader>
-      <el-button :icon="Refresh" @click="load()">刷新</el-button>
-    </PageHeader>
-
     <div class="panel">
       <div class="filters">
         <el-select v-model="filters.testId" placeholder="全部测试" clearable filterable style="width: 200px" @change="onFilterChange">
@@ -144,6 +139,7 @@ onBeforeUnmount(() => {
           <el-option label="未存档" :value="false" />
         </el-select>
         <el-button link type="primary" @click="resetFilters">清空筛选</el-button>
+        <el-button class="filters-refresh" :icon="Refresh" circle title="刷新" aria-label="刷新" @click="load()" />
       </div>
 
       <el-table v-loading="loading" :data="items" empty-text="没有符合条件的运行">
@@ -239,6 +235,9 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px;
   margin-bottom: 14px;
+}
+.filters-refresh {
+  margin-left: auto;
 }
 .run-link {
   color: var(--el-color-primary);
