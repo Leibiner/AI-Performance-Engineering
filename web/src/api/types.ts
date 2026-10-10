@@ -106,17 +106,35 @@ export interface ApiDefInput {
   extracts: Extract[]
   note: string
 }
-/** 引用了这个接口的业务流程（GET 时的只读字段） */
-export interface ApiUsage {
-  flowId: number
-  flowName: string
-  /** 在初始化段 / 每次迭代里是第几步，从 1 开始 */
-  initSteps: number[]
-  steps: number[]
-  /** 流程的步骤全是这个接口：删掉它流程就空了 */
-  onlyThisApi: boolean
+/** 引用的种类（契约 §3.8） */
+export type RefKind = 'api' | 'flow' | 'test' | 'dataset' | 'file'
+/** 谁引用了它：同一个引用方引用多次时合并，where 列出全部位置（如"第 1 步"） */
+export interface Usage {
+  kind: RefKind
+  id: number
+  name: string
+  where: string[]
 }
-export type ApiDef = ApiDefInput & Stamped & { usedBy?: ApiUsage[] }
+/** 它引用的对象里已被删除的（失效引用） */
+export interface BrokenRef {
+  kind: RefKind
+  id: number
+  where: string[]
+}
+/** 删除影响：逐层列出直接和间接引用了它的对象 */
+export interface ImpactNode {
+  kind: RefKind
+  id: number
+  name: string
+  where?: string[]
+  usedBy: ImpactNode[]
+}
+/** GET 时的标准引用字段（契约 §3.8） */
+export interface References {
+  usedBy?: Usage[]
+  brokenRefs?: BrokenRef[]
+}
+export type ApiDef = ApiDefInput & Stamped & References
 
 export interface FlowStepInput {
   apiId: number
@@ -162,14 +180,7 @@ export interface FlowInput {
   reinitSec: number | null
   steps: FlowStepInput[]
 }
-/** 引用了这个流程的测试（GET 时的只读字段） */
-export interface FlowUsage {
-  testId: number
-  testName: string
-  /** 测试里只有这一个流程：删掉流程测试就空了 */
-  onlyThisFlow: boolean
-}
-export interface Flow extends Stamped {
+export interface Flow extends Stamped, References {
   name: string
   note: string
   datasets: FlowDataset[]
@@ -177,7 +188,6 @@ export interface Flow extends Stamped {
   initSteps: FlowStep[]
   reinitSec: number | null
   steps: FlowStep[]
-  usedBy?: FlowUsage[]
 }
 
 export interface DatasetSource {
@@ -194,7 +204,7 @@ export interface Dataset extends Stamped {
   rowCount: number
   sha256: string
   source: DatasetSource
-  usedBy: { flowId: number; flowName: string }[]
+  usedBy: Usage[]
 }
 export interface DatasetDetail extends Dataset {
   /** 前 100 行，顺序同 columns */
@@ -221,7 +231,7 @@ export interface FileAsset extends Stamped {
   size: number
   sha256: string
   note: string
-  usedBy: { apiId: number; apiName: string }[]
+  usedBy: Usage[]
 }
 export interface FileAssetInput {
   name: string
@@ -303,7 +313,7 @@ export interface LastRun {
   verdict: Verdict | null
   startedAt: string
 }
-export interface TestDef extends Stamped {
+export interface TestDef extends Stamped, References {
   name: string
   note: string
   flows: TestFlow[]

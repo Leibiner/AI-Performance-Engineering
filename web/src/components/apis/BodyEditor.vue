@@ -6,6 +6,7 @@ import { useFileList } from '../../composables/useFileList'
 import { isBlankRow, type ApiForm, type BodyMode, type FormRow } from '../../utils/api-form'
 import { tryPrettyJson } from '../../utils/debug'
 import { formatBytes } from '../../utils/format'
+import { brokenLabel } from '../../utils/references'
 import VarInput from '../VarInput.vue'
 
 const form = defineModel<ApiForm>({ required: true })
@@ -54,7 +55,7 @@ function onFileListOpen(open: boolean): void {
   if (open) void refreshFiles()
 }
 function missingFileLabel(id: number): string {
-  return filesLoaded.value ? `文件已删除（#${id}）` : `文件 #${id}`
+  return filesLoaded.value ? brokenLabel('file', id) : `文件 #${id}`
 }
 
 const uploadInput = ref<HTMLInputElement>()

@@ -22,7 +22,7 @@ from typing import Any
 from fastapi import APIRouter, Body
 from fastapi.responses import Response
 
-from . import config, datasets, db, executors, files
+from . import config, datasets, db, executors, files, references
 from .errors import ApiError, bad_request, conflict, not_found
 from .plan import FlowSpec, build_plan, expand_flow, normalized_weights, write_inputs
 from .resources import ENVIRONMENTS, FLOWS, PROFILES, TESTS, get_obj
@@ -293,10 +293,11 @@ def _preflight(conn, test_id: int, profile_id: int, env_id: int, executor_id: in
     if test is not None:
         if not test["flows"]:
             details.append(f"测试“{test['name']}”没有选择任何业务流程")
+        # 失效引用（引用的流程已被删除）的提示由引用登记表统一生成（契约 §3.8）
+        details.extend(references.broken_messages(references.Lookup(conn), "test", test, test["name"]))
         for item in test["flows"]:
             flow = get_obj(conn, FLOWS, item["flowId"])
             if flow is None:
-                details.append(f"测试“{test['name']}”引用的业务流程 #{item['flowId']} 已被删除（失效）：在测试里换一个流程，或移除它")
                 continue
             spec, ok = expand_flow(conn, flow, item["weight"], details, cache)
             specs.append(spec)

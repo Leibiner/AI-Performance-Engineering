@@ -140,7 +140,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   - `header`：`expr` 是响应头名称，不区分大小写
   - `cookie`（2026-10-10 加入）：`expr` 是 Cookie 名称。先找这次响应（最后一跳）设置的 Cookie，没有再在这个流程正在用的 Cookie 罐里找：先按这次请求的地址，再按重定向后的最终地址
   - 取到的值是对象或数组时存成 JSON 字符串；取不到（含 `null`）算提取失败
-- `usedBy`（2026-10-10 加入，只读，`PUT` 时忽略）：引用了这个接口的业务流程，`[{ "flowId": 1, "flowName": "访问首页", "initSteps": [], "steps": [1], "onlyThisApi": true }]`。`initSteps` / `steps` 是它在初始化段 / 每次迭代里是第几步（从 1 开始）；`onlyThisApi` 表示这个流程的步骤全是这个接口。接口被引用时也可以删除，引用它的步骤变成失效引用（见下文「失效引用」）
+- `usedBy`、`brokenRefs`（2026-10-10 加入，只读，`PUT` 时忽略）：标准的引用字段，见 §3.8。接口被引用时也可以删除，引用它的步骤变成失效引用（见下文「失效引用」）
 
 **业务流程 `/api/flows`**
 
@@ -164,7 +164,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   - `onExhausted`：`recycle`（循环使用）或 `stop`（停止测试，判 `invalid`）。`pick` 为 `random` 时只能是 `recycle`。`sequential` 下"用完"指行都取过一遍；`perVu` 下"用完"指 VU 数超过行数
   - 同一流程绑定的多个数据集，列名不能重复
 - `variables`（2026-10-10 加入，省略时为 `[]`）：**流程变量**，每次迭代开始时（取完数据集的行之后、初始化段之前）按顺序求值一次，`value` 里可以引用环境变量、数据集的列、前面的流程变量和动态变量。用途：同一次迭代里多个步骤共用一个生成的值（例如订单号）。`name` 符合变量名规则、不能重复、不能和绑定的数据集的列重名
-- `GET` 返回时 `steps` 和 `initSteps` 的每项额外带 `apiName`、`method`、`path`；`datasets` 的每项额外带 `datasetName`、`columns`、`rowCount`；另带 `usedBy`：引用了这个流程的测试 `[{ "testId": 1, "testName": "百度首页冒烟", "onlyThisFlow": true }]`，`onlyThisFlow` 表示测试里只有这一个流程（都是只读的展示字段，`PUT` 时忽略）
+- `GET` 返回时 `steps` 和 `initSteps` 的每项额外带 `apiName`、`method`、`path`；`datasets` 的每项额外带 `datasetName`、`columns`、`rowCount`；另带标准的引用字段 `usedBy`、`brokenRefs`（§3.8）（都是只读的展示字段，`PUT` 时忽略）
 - **失效引用**（2026-10-10 起；之前是被引用就 409 不能删除）：每个定义都可以单独删除，被引用不挡删除，引用它的地方变成失效引用，不级联删除任何东西：
   - 接口被删除：流程里引用它的步骤保留原 `apiId`，`GET` 时这一步的 `apiName`、`method`、`path` 为 `null`
   - 数据集被删除：流程里的绑定保留原 `datasetId`，`datasetName`、`columns`、`rowCount` 为 `null`
@@ -237,7 +237,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 
 - `flows[].weight`：正数，后端不要求和为 1，组装 plan 时归一化
 - `slo` 各字段可为 `null`（表示不设该项）
-- `GET` 返回时每个 flow 额外带 `flowName`；另带 `lastRun: { runId, verdict, startedAt } | null`
+- `GET` 返回时每个 flow 额外带 `flowName`；另带 `lastRun: { runId, verdict, startedAt } | null`；另带 `brokenRefs`（§3.8）
 - 流程被测试引用时也可以删除，测试里的这一项变成失效引用（见上文「失效引用」）；测试、负载配置、环境有运行记录时可以删除（运行里存了快照）
 
 ### 3.2 运行 `/api/runs`
@@ -481,7 +481,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
   "columns": ["username", "password"], "rowCount": 100,
   "sha256": "9f2c…（64 位十六进制）",
   "source": { "fileName": "users.csv", "encoding": "gb18030", "delimiter": "," },
-  "usedBy": [ { "flowId": 1, "flowName": "下单" } ],
+  "usedBy": [ { "kind": "flow", "id": 1, "name": "下单", "where": ["数据集绑定第 1 项"] } ],
   "createdAt": "…", "updatedAt": "…"
 }
 ```
@@ -494,7 +494,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 - 之后的每一行是数据：空行跳过；字段数必须和表头相同（不通过时列出前 5 个出错的行号，行号按文件里的物理行计，表头是第 1 行）；值是字符串，原样保存，不去空白
 - 至少 1 行数据，最多 100,000 行；解码后的文本按 UTF-8 计不超过 10 MiB，`contentBase64` 解码后的字节不超过 10 MiB
 - `sha256`：`{"columns": [...], "rows": [[...], ...]}` 按 UTF-8、紧凑 JSON（`ensure_ascii=False`，分隔符 `,` `:`）序列化后的摘要。plan 里带着它，便于确认一次运行用的是哪一版数据
-- `usedBy`（只读）：绑定了这个数据集的业务流程
+- `usedBy`（只读）：绑定了这个数据集的业务流程，标准格式见 §3.8
 
 ### 3.7 文件 `/api/files`（2026-10-10 加入）
 
@@ -513,7 +513,7 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 {
   "id": 3, "name": "avatar.png", "contentType": "image/png", "size": 20480,
   "sha256": "…", "note": "",
-  "usedBy": [ { "apiId": 7, "apiName": "上传头像" } ],
+  "usedBy": [ { "kind": "api", "id": 7, "name": "上传头像", "where": ["表单第 2 项"] } ],
   "createdAt": "…", "updatedAt": "…"
 }
 ```
@@ -522,7 +522,40 @@ server/（Python 3.12 + FastAPI + sqlite3，依赖由 uv 管理）
 - `contentType`：可省略，省略或为空时按文件名的扩展名推断，推断不出用 `application/octet-stream`
 - 大小不超过 10 MiB（可以是 0 字节）
 - `/content` 的响应带 `X-Content-Type-Options: nosniff` 和 `Content-Security-Policy: sandbox`，上传的 HTML 不会在本站执行脚本
-- `usedBy`（只读）：在 `form` 里引用了这个文件的接口
+- `usedBy`（只读）：在 `form` 里引用了这个文件的接口（包括 `raw` 时保留的表单），标准格式见 §3.8
+
+### 3.8 引用（2026-10-10 加入）
+
+定义之间按 id 引用。所有引用关系在后端登记一次（`server/references.py` 的 `RELATIONS`）：引用方、字段、被引用方、引用位置的叫法。下面的字段、接口和提示都由它生成，各资源格式一致。
+
+| 引用方 | 字段 | 被引用方 | 位置（`where`） |
+|---|---|---|---|
+| 业务流程 `flow` | `initSteps[].apiId` | 接口 `api` | `初始化第 N 步` |
+| 业务流程 `flow` | `steps[].apiId` | 接口 `api` | `第 N 步` |
+| 业务流程 `flow` | `datasets[].datasetId` | 数据集 `dataset` | `数据集绑定第 N 项` |
+| 测试 `test` | `flows[].flowId` | 业务流程 `flow` | `第 N 个流程` |
+| 接口 `api` | `form[].fileId`（`type` 为 `file`） | 文件 `file` | `表单第 N 项` |
+
+**标准字段**（`GET` 时的只读字段，`PUT` 时忽略）：
+
+- `usedBy`：谁引用了它，`[{ "kind": "flow", "id": 1, "name": "访问首页", "where": ["第 1 步"] }]`。同一个引用方引用多次时合并成一项，`where` 列出全部位置。接口、业务流程、测试、数据集、文件都有（没有被引用时是 `[]`）
+- `brokenRefs`：它引用的对象里哪些已被删除，`[{ "kind": "api", "id": 1, "where": ["第 1 步"] }]`。接口、业务流程、测试有（它们是引用方）
+
+**删除影响**：`GET /api/references/:kind/:id`（`kind` 是上表的种类）返回删除这个对象会让哪些引用失效，逐层包含间接受影响的对象：
+
+```json
+{ "kind": "api", "id": 1, "name": "百度首页",
+  "usedBy": [ { "kind": "flow", "id": 1, "name": "访问首页", "where": ["第 1 步"],
+                "usedBy": [ { "kind": "test", "id": 1, "name": "百度首页冒烟", "where": ["第 1 个流程"], "usedBy": [] } ] } ] }
+```
+
+种类不认识或对象不存在返回 404。页面删除任何定义之前都用它：`usedBy` 为空时普通确认；不为空时列出这棵树，确认后只删这一个对象。
+
+**失效引用的提示**：预检、试跑、发送遇到失效引用时，提示一律是
+
+`<引用方中文名>“<名称>”<位置>引用的<被引用方中文名> #<id> 已被删除（失效引用）：换一个<被引用方中文名>，或移除这一项`
+
+例如：`业务流程“访问首页”第 1 步引用的接口 #1 已被删除（失效引用）：换一个接口，或移除这一项`。页面上失效引用显示为 `<被引用方中文名>已删除（#<id>）`。
 
 ## 4. plan.json（后端 → k6）
 

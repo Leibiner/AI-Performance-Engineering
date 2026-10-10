@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Body
 from fastapi.responses import Response
 
-from . import db
+from . import db, references
 from .errors import bad_request, not_found
 from .files import attachment, decode_base64, fmt_size
 from .validators import VAR_NAME_RULE, Checker, is_int, is_var_name
@@ -190,14 +190,8 @@ def parse_payload(payload: dict, problems: list[str], *, required: bool) -> dict
 # ---------- 读写 ----------
 
 def _usage(conn) -> dict[int, list[dict]]:
-    """数据集 id → 绑定了它的业务流程。"""
-    used: dict[int, list[dict]] = {}
-    for row in conn.execute("SELECT id, name, datasets FROM flows ORDER BY id"):
-        for binding in db.loads(row["datasets"]) or []:
-            ds_id = binding.get("datasetId") if isinstance(binding, dict) else None
-            if is_int(ds_id):
-                used.setdefault(ds_id, []).append({"flowId": row["id"], "flowName": row["name"]})
-    return used
+    """数据集 id → 引用了它的对象（标准格式，契约 §3.8）。"""
+    return references.used_by(conn, "dataset")
 
 
 def _to_obj(row, used: dict[int, list[dict]]) -> dict:

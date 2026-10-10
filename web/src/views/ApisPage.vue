@@ -2,13 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ApiError, apisApi, flowsApi, foldersApi, type ApiDef, type Folder, type FlowUsage } from '../api'
+import { ApiError, apisApi, foldersApi, type ApiDef, type Folder } from '../api'
 import { useResourceList } from '../composables/useResourceList'
 import { confirmAction, errorMessage, showError } from '../utils/feedback'
 import { emptyForm, formProblem, fromApi, snapshot, toInput, type ApiForm } from '../utils/api-form'
 import type { CurlImport } from '../utils/curl'
 import { buildFolderTree, folderOptions, folderPath } from '../utils/folders'
-import { confirmDeleteApi } from '../utils/dependencies'
 import { useApiIndex } from '../composables/useApiIndex'
 import PageHeader from '../components/PageHeader.vue'
 import ApiList from '../components/apis/ApiList.vue'
@@ -16,7 +15,7 @@ import ApiEditor from '../components/apis/ApiEditor.vue'
 import CurlImportDialog from '../components/apis/CurlImportDialog.vue'
 import DebugEnvBar from '../components/debug/DebugEnvBar.vue'
 
-const { items, loading, load, remove } = useResourceList(apisApi, '接口')
+const { items, loading, load, remove } = useResourceList(apisApi, '接口', 'api')
 
 const folders = ref<Folder[]>([])
 async function loadFolders(): Promise<void> {
@@ -88,7 +87,9 @@ const saving = ref(false)
 const importVisible = ref(false)
 
 const isNew = computed(() => form.value !== null && selectedId.value === null)
-const usedBy = computed(() => items.value.find((a) => a.id === selectedId.value)?.usedBy ?? [])
+const current = computed(() => items.value.find((a) => a.id === selectedId.value))
+const usedBy = computed(() => current.value?.usedBy ?? [])
+const brokenRefs = computed(() => current.value?.brokenRefs ?? [])
 const dirty = computed(() => form.value !== null && snapshot(form.value) !== baseline.value)
 /** 正在新建时，新接口在树里的位置（跟着表单里的所属文件夹走） */
 const draftFolderId = computed<number | null | undefined>(() => (isNew.value ? (form.value?.folderId ?? null) : undefined))
@@ -324,25 +325,7 @@ async function save(): Promise<void> {
 async function del(): Promise<void> {
   const api = items.value.find((a) => a.id === selectedId.value)
   if (!api) return
-  // 被流程引用也可以删：先列出会失效的步骤，确认后只删这个接口
-  let confirmed = false
-  try {
-    const fresh = await apisApi.get(api.id)
-    if (fresh.usedBy?.length) {
-      let testsOf = new Map<number, FlowUsage[]>()
-      try {
-        testsOf = new Map((await flowsApi.list()).map((f) => [f.id, f.usedBy ?? []]))
-      } catch {
-        // 拿不到测试的引用也照样列出流程
-      }
-      if (!(await confirmDeleteApi(router, fresh.name, fresh.usedBy, testsOf))) return
-      confirmed = true
-    }
-  } catch (e) {
-    showError(e, '删除失败')
-    return
-  }
-  await remove(api, confirmed)
+  await remove(api)
   // 被流程引用时删除会被拒绝（409），列表里还在；真删掉了才清空右栏
   if (!items.value.some((a) => a.id === api.id)) {
     cancelAutoSave()
@@ -385,6 +368,7 @@ async function del(): Promise<void> {
           :save-status="saveStatus"
           :save-error="saveError"
           :used-by="usedBy"
+          :broken-refs="brokenRefs"
           :folder-options="folderSelectOptions"
           :producers="producers"
           @save="save"

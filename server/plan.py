@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import datasets
+from . import datasets, references
 from .resources import APIS, get_obj
 
 DATASETS_DIR = "datasets"
@@ -46,30 +46,28 @@ def expand_flow(conn, flow: dict, weight: float, details: list[str], cache: dict
         details.append(f"业务流程“{name}”没有任何步骤")
         complete = False
 
-    def resolve(items: list[dict], label: str) -> list[tuple[dict, Any]]:
-        nonlocal complete
+    # 失效引用（引用的接口、数据集已被删除）的提示由引用登记表统一生成（契约 §3.8）
+    broken = references.broken_messages(references.Lookup(conn), "flow", flow, name)
+    if broken:
+        details.extend(broken)
+        complete = False
+
+    def resolve(items: list[dict]) -> list[tuple[dict, Any]]:
         out = []
-        for index, step in enumerate(items, 1):
+        for step in items:
             api = get_obj(conn, APIS, step["apiId"])
-            if api is None:
-                details.append(
-                    f"业务流程“{name}”{label}第 {index} 步引用的接口 #{step['apiId']} 已被删除（失效步骤）：在流程里换一个接口，或移除这一步"
-                )
-                complete = False
-                continue
-            out.append((api, step["thinkTimeMs"]))
+            if api is not None:
+                out.append((api, step["thinkTimeMs"]))
         return out
 
-    init_steps = resolve(flow.get("initSteps") or [], "初始化")
-    steps = resolve(flow["steps"], "")
+    init_steps = resolve(flow.get("initSteps") or [])
+    steps = resolve(flow["steps"])
     wanted = flow.get("datasets") or []
     loaded = datasets.load_many(conn, [b["datasetId"] for b in wanted], cache)
     bindings = []
     for binding in wanted:
         ds = loaded.get(binding["datasetId"])
         if ds is None:
-            details.append(f"业务流程“{name}”绑定的数据集 #{binding['datasetId']} 已被删除（失效绑定）：在流程里换一个数据集，或解除绑定")
-            complete = False
             continue
         bindings.append({"dataset": ds, "pick": binding["pick"], "onExhausted": binding["onExhausted"]})
     spec = FlowSpec(

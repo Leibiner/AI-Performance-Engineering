@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { ArrowDown, ArrowUp, Bottom, Delete, Plus, Top } from '@element-plus/icons-vue'
 import type { ApiDef, StepPhase } from '../../api'
+import { brokenLabel } from '../../utils/references'
 import type { StepVars } from '../../utils/var-sources'
 
 export interface StepRow {
@@ -22,7 +23,7 @@ const props = defineProps<{
   /** 有文件夹时按文件夹分组 */
   groups: ApiGroup[] | null
   checks: (StepVars | null)[]
-  /** 引用的接口已被删除的 id（来自后端返回的流程：apiName 为 null） */
+  /** 引用的接口已被删除的 id（契约 §3.8 brokenRefs） */
   missing?: Set<number>
 }>()
 const isMissing = (step: StepRow): boolean =>
@@ -65,7 +66,7 @@ const entries = computed(() => steps.value.map((step, index) => ({ step, index, 
           <template v-else>
             <el-option v-for="api in apis" :key="api.id" :label="apiLabel(api)" :value="api.id" />
           </template>
-          <el-option v-if="isMissing(step)" :value="step.apiId!" :label="`接口已删除（#${step.apiId}）`" />
+          <el-option v-if="isMissing(step)" :value="step.apiId!" :label="brokenLabel('api', step.apiId!)" />
         </el-select>
         <el-input-number
           v-model="step.thinkTimeMs"

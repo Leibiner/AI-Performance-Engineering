@@ -1,32 +1,25 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { datasetsApi, type Dataset } from '../../api'
 import { useResourceList } from '../../composables/useResourceList'
-import { confirmDeleteDataset } from '../../utils/dependencies'
-import { showError } from '../../utils/feedback'
+import UsageTag from '../refs/UsageTag.vue'
 import { formatCount, formatTime } from '../../utils/format'
 import { describeSource } from '../../utils/test-data'
 import DatasetDialog from './DatasetDialog.vue'
 
-const { items, loading, load, remove } = useResourceList(datasetsApi, '数据集')
+const { items, loading, load, remove } = useResourceList(datasetsApi, '数据集', 'dataset')
+const route = useRoute()
 const router = useRouter()
 
-/** 被流程绑定也可以删：先列出会失效的绑定，确认后只删这个数据集 */
-async function del(row: Dataset): Promise<void> {
-  let confirmed = false
-  try {
-    const fresh = await datasetsApi.get(row.id)
-    if (fresh.usedBy.length) {
-      if (!(await confirmDeleteDataset(router, fresh.name, fresh.usedBy))) return
-      confirmed = true
-    }
-  } catch (e) {
-    showError(e, '删除失败')
-    return
-  }
-  await remove(row, confirmed)
-}
+// 从别的页面点过来（/data?tab=datasets&edit=2）：列表加载完后直接打开这个数据集
+watch(items, (list) => {
+  const id = Number(route.query.edit)
+  const row = Number.isInteger(id) ? list.find((d) => d.id === id) : undefined
+  if (!row) return
+  void router.replace({ query: { tab: 'datasets' } })
+  openEdit(row)
+})
 
 const MAX_TAGS = 6
 const dialogVisible = ref(false)
@@ -81,13 +74,9 @@ defineExpose({ openCreate })
         <span class="num">{{ formatCount((row as Dataset).rowCount) }}</span>
       </template>
     </el-table-column>
-    <el-table-column label="绑定的流程" min-width="180">
+    <el-table-column label="被引用" min-width="160">
       <template #default="{ row }">
-        <div v-if="(row as Dataset).usedBy?.length" class="tag-line">
-          <el-tag v-for="u in (row as Dataset).usedBy" :key="u.flowId" size="small" effect="plain" disable-transitions>
-            {{ u.flowName }}
-          </el-tag>
-        </div>
+        <UsageTag v-if="(row as Dataset).usedBy?.length" :usages="(row as Dataset).usedBy" />
         <span v-else class="muted">—</span>
       </template>
     </el-table-column>
@@ -100,7 +89,7 @@ defineExpose({ openCreate })
       <template #default="{ row }">
         <el-button link type="primary" @click="openEdit(row as Dataset)">编辑</el-button>
         <el-button link type="primary" tag="a" :href="datasetsApi.csvUrl((row as Dataset).id, true)">下载</el-button>
-        <el-button link type="danger" @click="del(row as Dataset)">删除</el-button>
+        <el-button link type="danger" @click="remove(row as Dataset)">删除</el-button>
       </template>
     </el-table-column>
   </el-table>

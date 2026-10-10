@@ -17,8 +17,8 @@ import {
 import { useDatasetList } from '../composables/useDatasetList'
 import { useDebugContext } from '../composables/useDebugContext'
 import { useResourceList } from '../composables/useResourceList'
-import { confirmDeleteFlow } from '../utils/dependencies'
 import { showError } from '../utils/feedback'
+import { brokenIds, brokenLabel } from '../utils/references'
 import { folderPath } from '../utils/folders'
 import { EXHAUSTED_OPTIONS, INIT_SEGMENT_TITLE, MAIN_SEGMENT_TITLE, PICK_LABELS, PICK_OPTIONS } from '../utils/test-data'
 import { analyzeFlow, refResolver, type FlowVarModel } from '../utils/var-sources'
@@ -29,8 +29,10 @@ import DebugEnvBar from '../components/debug/DebugEnvBar.vue'
 import EnvPicker from '../components/debug/EnvPicker.vue'
 import FlowDebugDialog from '../components/debug/FlowDebugDialog.vue'
 import FlowStepList, { type ApiGroup, type StepRow } from '../components/flows/FlowStepList.vue'
+import BrokenTag from '../components/refs/BrokenTag.vue'
+import UsageTag from '../components/refs/UsageTag.vue'
 
-const { items, loading, load, remove } = useResourceList(flowsApi, '业务流程')
+const { items, loading, load, remove } = useResourceList(flowsApi, '业务流程', 'flow')
 const route = useRoute()
 const router = useRouter()
 
@@ -43,21 +45,6 @@ watch(items, (list) => {
   openEdit(flow)
 })
 
-/** 被测试引用也可以删：先列出会失效的测试，确认后只删这个流程 */
-async function del(row: Flow): Promise<void> {
-  let confirmed = false
-  try {
-    const fresh = await flowsApi.get(row.id)
-    if (fresh.usedBy?.length) {
-      if (!(await confirmDeleteFlow(router, fresh.name, fresh.usedBy))) return
-      confirmed = true
-    }
-  } catch (e) {
-    showError(e, '删除失败')
-    return
-  }
-  await remove(row, confirmed)
-}
 const ctx = useDebugContext()
 const { datasets, refresh: refreshDatasets } = useDatasetList()
 
@@ -180,24 +167,11 @@ function moveToInit(index: number): void {
   form.initSteps.push(step)
 }
 
-/** 编辑中的流程里引用了已删除接口的步骤（后端返回 apiName 为 null） */
-const missingApiIds = computed(
-  () =>
-    new Set(
-      [...(editingFlow.value?.initSteps ?? []), ...(editingFlow.value?.steps ?? [])]
-        .filter((s) => s.apiName === null)
-        .map((s) => s.apiId),
-    ),
-)
+/** 编辑中的流程里失效的引用（契约 §3.8 brokenRefs） */
+const missingApiIds = computed(() => brokenIds(editingFlow.value?.brokenRefs, 'api'))
+const missingDatasetIds = computed(() => brokenIds(editingFlow.value?.brokenRefs, 'dataset'))
 function datasetMissing(id: number | undefined): boolean {
-  if (id === undefined || datasets.value.some((d) => d.id === id)) return false
-  return editingFlow.value?.datasets?.some((b) => b.datasetId === id && b.datasetName === null) ?? false
-}
-/** 列表里每个流程的失效引用：已删除的接口、数据集 */
-function brokenRefs(flow: Flow): string[] {
-  const out = [...(flow.initSteps ?? []), ...(flow.steps ?? [])].filter((s) => s.apiName === null).map((s) => `接口 #${s.apiId}`)
-  out.push(...(flow.datasets ?? []).filter((b) => b.datasetName === null).map((b) => `数据集 #${b.datasetId}`))
-  return out
+  return id !== undefined && missingDatasetIds.value.has(id) && !datasets.value.some((d) => d.id === id)
 }
 
 function datasetInfo(id: number | undefined): { name: string; columns: string[]; rowCount: number | null } | null {
@@ -205,7 +179,7 @@ function datasetInfo(id: number | undefined): { name: string; columns: string[];
   const d = datasets.value.find((x) => x.id === id)
   if (d) return { name: d.name, columns: d.columns, rowCount: d.rowCount }
   const bound = editingFlow.value?.datasets?.find((x) => x.datasetId === id)
-  return bound ? { name: bound.datasetName ?? `数据集已删除（#${id}）`, columns: bound.columns ?? [], rowCount: bound.rowCount ?? null } : null
+  return bound ? { name: bound.datasetName ?? brokenLabel('dataset', id), columns: bound.columns ?? [], rowCount: bound.rowCount ?? null } : null
 }
 function addDataset(): void {
   form.datasets.push({ key: nextKey(), datasetId: undefined, pick: 'sequential', onExhausted: 'recycle' })
@@ -335,17 +309,7 @@ const datasetTitle = (row: Flow) =>
         <el-table-column label="名称" min-width="180">
           <template #default="{ row }">
             <span>{{ (row as Flow).name }}</span>
-            <el-tag
-              v-if="brokenRefs(row as Flow).length"
-              size="small"
-              type="danger"
-              effect="plain"
-              class="flow-tag"
-              :title="`已删除：${brokenRefs(row as Flow).join('、')}`"
-              disable-transitions
-            >
-              失效 {{ brokenRefs(row as Flow).length }}
-            </el-tag>
+            <BrokenTag :refs="(row as Flow).brokenRefs ?? []" />
             <el-tag
               v-if="(row as Flow).datasets?.length"
               size="small"
@@ -357,16 +321,7 @@ const datasetTitle = (row: Flow) =>
             >
               数据集 {{ (row as Flow).datasets.length }}
             </el-tag>
-            <el-tag
-              v-if="(row as Flow).usedBy?.length"
-              size="small"
-              effect="plain"
-              class="flow-tag"
-              :title="(row as Flow).usedBy!.map((t) => t.testName).join('、')"
-              disable-transitions
-            >
-              测试 {{ (row as Flow).usedBy!.length }}
-            </el-tag>
+            <UsageTag class="flow-usage" :usages="(row as Flow).usedBy ?? []" />
             <el-tag
               v-if="(row as Flow).variables?.length"
               size="small"
@@ -392,7 +347,7 @@ const datasetTitle = (row: Flow) =>
                   :title="`${step.method ?? ''} ${step.path ?? ''}`"
                 >
                   <span class="step-no">{{ index + 1 }}</span>
-                  {{ step.apiName ?? `接口已删除（#${step.apiId}）` }}
+                  {{ step.apiName ?? brokenLabel('api', step.apiId) }}
                 </span>
                 <span class="step-divider" />
               </template>
@@ -400,7 +355,7 @@ const datasetTitle = (row: Flow) =>
                 <span v-if="index > 0" class="step-arrow">→</span>
                 <span :class="['step-chip', { 'is-missing': step.apiName === null }]" :title="`${step.method ?? ''} ${step.path ?? ''}`">
                   <span class="step-no">{{ index + 1 }}</span>
-                  {{ step.apiName ?? `接口已删除（#${step.apiId}）` }}
+                  {{ step.apiName ?? brokenLabel('api', step.apiId) }}
                   <span v-if="step.thinkTimeMs > 0" class="muted">· 等待 {{ step.thinkTimeMs }} ms</span>
                 </span>
               </template>
@@ -413,7 +368,7 @@ const datasetTitle = (row: Flow) =>
           <template #default="{ row }">
             <el-button link type="primary" :icon="VideoPlay" @click="openDebug(row as Flow)">试跑</el-button>
             <el-button link type="primary" @click="openEdit(row as Flow)">编辑</el-button>
-            <el-button link type="danger" @click="del(row as Flow)">删除</el-button>
+            <el-button link type="danger" @click="remove(row as Flow)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -598,6 +553,9 @@ const datasetTitle = (row: Flow) =>
 </template>
 
 <style scoped>
+.flow-usage {
+  margin-left: 6px;
+}
 .step-chip.is-missing {
   border-color: var(--el-color-danger-light-5);
   color: var(--el-color-danger);

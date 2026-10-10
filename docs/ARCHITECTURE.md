@@ -436,6 +436,7 @@ results/<runId>/                 每次运行的产物：不入 git
 | 测试、负载配置、被测环境 | 运行记录（有快照） | — |
 
 - 失效引用保存时可以原样保留，新增的引用必须有效；带失效引用的流程和测试在修好之前不能试跑和运行，预检逐条指出哪一步已被删除、怎么修。运行记录不受任何删除影响。
+- **提示是标准化的，不按对象类型各写各的**（契约 §3.8）：引用关系只在后端 `server/references.py` 的 `RELATIONS` 登记一次（引用方、字段、被引用方、位置的叫法），由它生成每个对象的 `usedBy`（谁引用了它）和 `brokenRefs`（它引用的对象里哪些已被删除）、删除影响接口 `GET /api/references/:kind/:id`（逐层含间接受影响的对象），以及预检里统一格式的失效提示；前端只登记每种对象的中文名和打开地址（`web/src/utils/references.ts`），删除确认、"被谁使用"（`UsageTag`）、"失效 N"（`BrokenTag`）和"<对象>已删除（#id）"的写法都由它生成。新增一种引用关系时只改这两处登记。
 - 删除测试、负载配置、被测环境后，运行详情的"再次运行"会被预检拒绝（用的是当前定义，不是快照）。
 
 **基线、历史、实验记录的存储形态待重新设计**：原设计是 git 管理的文件（`baselines/`、`history/`、`experiments/`）。现在运行已经在 SQLite 里，历史查询可以直接读 `runs` 表；基线放数据库还是放 git（保留"变更需要审核"这一点），到 Phase 2 再定。
@@ -787,6 +788,7 @@ AI-Performance-Engineering/
 │   ├── files.py                  文件：/api/files（JSON + base64 上传、下载）
 │   ├── plan.py                   运行和调试共用的 plan 组装；把用到的数据集和文件写进运行目录
 │   ├── variables.py              变量来源检查（预检第 8 条）、动态变量的参数规则
+│   ├── references.py             引用登记表：反向引用、失效引用、删除影响 /api/references、标准的失效提示
 │   ├── executors.py              执行机：/api/executors、本机信息实时采集、运行期间的 CPU / 内存采样
 │   ├── runs.py                   预检、组装 plan、启动 / 停止 k6、最终判定、Run Record、产物；调试与运行互斥的槽位
 │   ├── debug.py                  调试：组 1 并发 1 迭代的 plan、以调试模式跑 k6、读回调试记录（契约 §3.5）
@@ -803,6 +805,7 @@ AI-Performance-Engineering/
 │       │   ├── apis/             接口工作台：ApiList（左栏）、ApiEditor（请求栏 + 标签页 + 响应面板）、BodyEditor（四种请求体）、UpstreamPicker（先运行上游）、DataRowPicker（调试用数据行）、CurlImportDialog
 │       │   ├── flows/            FlowStepList（初始化段 / 每次迭代两段步骤，带变量来源标注）
 │       │   ├── data/             测试数据：DatasetsPanel、DatasetDialog、CsvPreview、FilesPanel
+│       │   ├── refs/             引用的标准提示：UsageTag（被谁使用）、BrokenTag（失效引用）
 │       │   └── debug/            调试：DebugEnvBar、EnvPicker（调试环境）、VariablesTable（变量表 + 动态变量清单）、DebugStepPanel（一步的响应）、DebugErrorView、FlowDebugDialog（流程试跑，可选数据行）
 │       ├── api/                  唯一的数据访问层：http.ts、types.ts（与契约对应）、index.ts
 │       ├── composables/          useResourceList、useStartRun（含生产环境二次确认）、useDebug / useDebugContext（调试与当前值）、useApiIndex（变量的产出和引用索引）、useDatasetList、useFileList、useDebugRows
@@ -1073,9 +1076,10 @@ flowchart LR
 
 | 接口 | 说明 |
 |---|---|
-| `GET / POST /api/<res>`，`GET / PUT / DELETE /api/<res>/:id` | 定义类资源统一的增删改查，`<res>` = `environments`、`folders`、`apis`、`flows`、`profiles`、`tests`。`PUT` 整体替换；被引用的接口和流程、非空的文件夹删除时返回 409 |
-| `/api/datasets`（含 `/:id/csv` 导出、`/preview` 只解析不保存） | 数据集：上传 CSV（`contentBase64`，自动识别 UTF-8 / GB18030 和分隔符）或提交 CSV 文本，后端解析成规范的行；被流程绑定时删除返回 409（契约 §3.6） |
-| `/api/files`（含 `/:id/content` 下载） | form-data 请求体引用的文件（JSON + base64 上传，≤ 10 MiB）；被接口引用时删除返回 409（契约 §3.7） |
+| `GET / POST /api/<res>`，`GET / PUT / DELETE /api/<res>/:id` | 定义类资源统一的增删改查，`<res>` = `environments`、`folders`、`apis`、`flows`、`profiles`、`tests`。`PUT` 整体替换；被引用的定义也能删除（引用处变成失效引用），非空的文件夹删除时返回 409 |
+| `/api/datasets`（含 `/:id/csv` 导出、`/preview` 只解析不保存） | 数据集：上传 CSV（`contentBase64`，自动识别 UTF-8 / GB18030 和分隔符）或提交 CSV 文本，后端解析成规范的行；被流程绑定时也能删除，绑定变成失效引用（契约 §3.6） |
+| `/api/files`（含 `/:id/content` 下载） | form-data 请求体引用的文件（JSON + base64 上传，≤ 10 MiB）；被接口引用时也能删除，引用处变成失效引用（契约 §3.7） |
+| `GET /api/references/:kind/:id` | 删除影响：哪些对象引用了它，逐层含间接受影响的对象（契约 §3.8）。页面删除任何定义前都先查它 |
 | `GET /api/executors`，`GET / PUT /api/executors/:id` | 执行机。目前恒为 1 项（本机），没有新增和删除；`PUT` 只能改名称和备注 |
 | `POST /api/runs` | 发起运行：`{testId, profileId, envId, executorId?, confirmProd?, note}`。`executorId` 省略时用本机执行机；被测环境是生产时必须带 `confirmProd: true`。成功返回 201；预检不通过 422；已有运行 409 |
 | `POST /api/debug` | 调试：`{envId, confirmProd?, api + vars? + beforeApiIds? \| flowId, rows?}`，用真实 k6 跑一次迭代，同步返回每一步的请求、响应、检查、变量（契约 §3.5）。`beforeApiIds` 先跑上游接口，`rows` 指定数据集的行；试跑流程不接受 `vars`，并做变量来源检查。有运行在进行或上一次调试未结束 409；k6 没产出记录 500 `DEBUG_FAILED` |

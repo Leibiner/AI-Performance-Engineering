@@ -16,7 +16,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Body
 from fastapi.responses import Response
 
-from . import db
+from . import db, references
 from .errors import not_found
 from .validators import Checker, is_int
 
@@ -66,17 +66,8 @@ def attachment(filename: str, fallback: str) -> str:
 # ---------- 读写 ----------
 
 def _usage(conn) -> dict[int, list[dict]]:
-    """文件 id → 在 form 里引用了它的接口。不看 bodyType：form 不管发不发都保存着这个引用。"""
-    used: dict[int, list[dict]] = {}
-    for row in conn.execute("SELECT id, name, form FROM apis ORDER BY id"):
-        ids: list[int] = []
-        for item in db.loads(row["form"]) or []:
-            file_id = item.get("fileId") if isinstance(item, dict) and item.get("type") == "file" else None
-            if is_int(file_id) and file_id not in ids:
-                ids.append(file_id)
-        for file_id in ids:
-            used.setdefault(file_id, []).append({"apiId": row["id"], "apiName": row["name"]})
-    return used
+    """文件 id → 引用了它的对象（标准格式，契约 §3.8）。"""
+    return references.used_by(conn, "file")
 
 
 def _to_obj(row, used: dict[int, list[dict]]) -> dict:
@@ -162,9 +153,11 @@ def load_for_steps(conn, apis: list[dict]) -> tuple[dict[int, dict], list[str]]:
                 wanted.append((api, item.get("fileId")))
     loaded = load_many(conn, [file_id for _, file_id in wanted])
     problems: list[str] = []
-    for api, file_id in wanted:
-        if file_id not in loaded:
-            problem = f"接口“{api['name']}”的 form-data 请求体引用的文件 #{file_id} 已被删除（失效文件项）：在接口里重新选择文件"
+    lookup = references.Lookup(conn)
+    for api in apis:
+        if api.get("bodyType") != "multipart":
+            continue
+        for problem in references.broken_messages(lookup, "api", api, api["name"]):
             if problem not in problems:
                 problems.append(problem)
     return loaded, problems

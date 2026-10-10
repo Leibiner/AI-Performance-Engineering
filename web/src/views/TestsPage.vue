@@ -6,13 +6,15 @@ import { Delete, Plus, VideoPlay } from '@element-plus/icons-vue'
 import { flowsApi, testsApi, type Flow, type TestDef, type TestInput } from '../api'
 import { useResourceList } from '../composables/useResourceList'
 import { showError } from '../utils/feedback'
+import { brokenIds, brokenLabel } from '../utils/references'
+import BrokenTag from '../components/refs/BrokenTag.vue'
 import { formatPercent, formatTime, percentToRatio, ratioToPercent } from '../utils/format'
 import { sloItems } from '../utils/slo'
 import PageHeader from '../components/PageHeader.vue'
 import RunDialog from '../components/RunDialog.vue'
 import VerdictTag from '../components/VerdictTag.vue'
 
-const { items, loading, load, remove } = useResourceList(testsApi, '测试')
+const { items, loading, load, remove } = useResourceList(testsApi, '测试', 'test')
 const route = useRoute()
 const router = useRouter()
 
@@ -64,7 +66,7 @@ function emptyForm(): FormState {
 
 const dialogVisible = ref(false)
 const editingId = ref<number | null>(null)
-/** 编辑中的测试里引用了已删除流程的 id（后端返回 flowName 为 null） */
+/** 编辑中的测试里引用了已删除流程的 id（契约 §3.8 brokenRefs） */
 const missingFlowIds = ref<Set<number>>(new Set())
 const saving = ref(false)
 const formRef = ref<FormInstance>()
@@ -89,7 +91,7 @@ function openCreate(): void {
 
 function openEdit(row: TestDef): void {
   editingId.value = row.id
-  missingFlowIds.value = new Set((row.flows ?? []).filter((f) => f.flowName === null).map((f) => f.flowId))
+  missingFlowIds.value = brokenIds(row.brokenRefs, 'flow')
   Object.assign(form, {
     name: row.name,
     note: row.note ?? '',
@@ -159,7 +161,7 @@ function flowShares(test: TestDef): { name: string; share: string; missing: bool
   const list = test.flows ?? []
   const total = list.reduce((sum, f) => sum + f.weight, 0)
   return list.map((f) => ({
-    name: f.flowName ?? `流程已删除（#${f.flowId}）`,
+    name: f.flowName ?? brokenLabel('flow', f.flowId),
     missing: f.flowName === null,
     share: total > 0 ? formatPercent(f.weight / total, 1) : '',
   }))
@@ -181,7 +183,12 @@ function openRun(row: TestDef): void {
 
     <div class="panel">
       <el-table v-loading="loading" :data="items" empty-text="暂无数据">
-        <el-table-column prop="name" label="名称" min-width="160" />
+        <el-table-column label="名称" min-width="160">
+          <template #default="{ row }">
+            <span>{{ (row as TestDef).name }}</span>
+            <BrokenTag :refs="(row as TestDef).brokenRefs ?? []" />
+          </template>
+        </el-table-column>
         <el-table-column label="业务流程（占比）" min-width="200">
           <template #default="{ row }">
             <div v-for="(f, index) in flowShares(row as TestDef)" :key="index">
@@ -251,7 +258,7 @@ function openRun(row: TestDef): void {
                 <el-option
                   v-if="item.flowId !== undefined && missingFlowIds.has(item.flowId) && !flows.some((f) => f.id === item.flowId)"
                   :value="item.flowId"
-                  :label="`流程已删除（#${item.flowId}）`"
+                  :label="brokenLabel('flow', item.flowId)"
                 />
               </el-select>
               <el-input-number v-model="item.weight" :min="0" :step="1" controls-position="right" style="width: 150px" />

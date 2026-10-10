@@ -12,7 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 
-from . import config, datasets, db, debug, errors, executors, files, resources, runs, seed, system
+from . import config, datasets, db, debug, errors, executors, files, references, resources, runs, seed, system
 
 log = logging.getLogger("uvicorn.error")
 
@@ -54,6 +54,7 @@ for router in resources.routers:
     app.include_router(router)
 app.include_router(datasets.router)
 app.include_router(files.router)
+app.include_router(references.router)
 app.include_router(runs.router)
 app.include_router(debug.router)
 app.include_router(executors.router)

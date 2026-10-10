@@ -21,9 +21,11 @@ import type {
   FlowInput,
   Folder,
   FolderInput,
+  ImpactNode,
   Overview,
   Profile,
   ProfileInput,
+  RefKind,
   Run,
   RunListQuery,
   RunListResult,
@@ -136,4 +138,9 @@ export const systemApi = {
 
 export const overviewApi = {
   get: () => request<Overview>('GET', '/overview'),
+}
+
+/** 引用（契约 §3.8）：删除一个对象会让哪些引用失效，逐层包含间接受影响的对象 */
+export const referencesApi = {
+  impact: (kind: RefKind, id: number) => request<ImpactNode>('GET', `/references/${kind}/${id}`),
 }
