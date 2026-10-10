@@ -123,7 +123,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page">
-    <PageHeader title="运行">
+    <PageHeader>
       <el-button :icon="Refresh" @click="load()">刷新</el-button>
     </PageHeader>
 

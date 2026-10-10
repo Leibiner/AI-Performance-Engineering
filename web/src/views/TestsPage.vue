@@ -175,9 +175,7 @@ function openRun(row: TestDef): void {
 
 <template>
   <div class="page">
-    <PageHeader
-      title="测试"
-    >
+    <PageHeader>
       <el-button type="primary" :icon="Plus" @click="openCreate">新建测试</el-button>
     </PageHeader>
 

@@ -325,7 +325,7 @@ const datasetTitle = (row: Flow) =>
 
 <template>
   <div class="page">
-    <PageHeader title="业务流程">
+    <PageHeader>
       <DebugEnvBar />
       <el-button type="primary" :icon="Plus" @click="openCreate">新建流程</el-button>
     </PageHeader>

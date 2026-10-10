@@ -73,7 +73,7 @@ const verdictRows = computed(() => {
 
 <template>
   <div v-loading="loading" class="page">
-    <PageHeader title="概览">
+    <PageHeader>
       <el-button :icon="Refresh" @click="load()">刷新</el-button>
     </PageHeader>
 

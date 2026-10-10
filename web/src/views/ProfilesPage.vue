@@ -196,9 +196,7 @@ async function save(): Promise<void> {
 
 <template>
   <div class="page">
-    <PageHeader
-      title="负载配置"
-    >
+    <PageHeader>
       <el-button type="primary" :icon="Plus" @click="openCreate">新建负载配置</el-button>
     </PageHeader>
 

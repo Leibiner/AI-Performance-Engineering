@@ -142,7 +142,7 @@ async function save(): Promise<void> {
 
 <template>
   <div class="page">
-    <PageHeader title="被测环境">
+    <PageHeader>
       <el-button type="primary" :icon="Plus" @click="openCreate">新建被测环境</el-button>
     </PageHeader>
 

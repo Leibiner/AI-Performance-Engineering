@@ -93,7 +93,7 @@ async function save(): Promise<void> {
 
 <template>
   <div v-loading="loading" class="page">
-    <PageHeader title="执行机">
+    <PageHeader>
       <el-button :icon="Refresh" @click="load()">刷新</el-button>
     </PageHeader>
 

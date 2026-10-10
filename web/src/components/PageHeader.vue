@@ -1,15 +1,12 @@
 <script setup lang="ts">
-defineProps<{ title: string; description?: string }>()
+defineProps<{ description?: string }>()
 </script>
 
 <template>
-  <div class="page-header">
-    <div>
-      <h1 class="page-title">{{ title }}</h1>
-      <p v-if="description || $slots.description" class="page-desc">
-        <slot name="description">{{ description }}</slot>
-      </p>
-    </div>
+  <div v-if="description || $slots.description || $slots.default" class="page-header">
+    <p v-if="description || $slots.description" class="page-desc">
+      <slot name="description">{{ description }}</slot>
+    </p>
     <div class="page-actions"><slot /></div>
   </div>
 </template>

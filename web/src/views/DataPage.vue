@@ -15,7 +15,7 @@ const filesPanel = ref<InstanceType<typeof FilesPanel>>()
 
 <template>
   <div class="page">
-    <PageHeader title="测试数据">
+    <PageHeader>
       <el-button v-if="tab === 'datasets'" type="primary" :icon="Plus" @click="datasetsPanel?.openCreate()">新建数据集</el-button>
       <el-button v-else type="primary" :icon="Upload" :loading="filesPanel?.uploading" @click="filesPanel?.pickUpload()">
         上传文件

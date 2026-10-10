@@ -356,9 +356,7 @@ async function del(): Promise<void> {
 
 <template>
   <div class="page apis-page">
-    <PageHeader
-      title="接口"
-    >
+    <PageHeader>
       <DebugEnvBar />
     </PageHeader>
     <div class="workbench">
